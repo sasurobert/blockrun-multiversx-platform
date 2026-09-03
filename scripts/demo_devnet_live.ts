@@ -1,9 +1,40 @@
 #!/usr/bin/env node
-import { Address, Transaction, TransactionComputer } from "@multiversx/sdk-core";
+import fs from "fs";
+import path from "path";
+import { Address, AddressComputer, Transaction, TransactionComputer } from "@multiversx/sdk-core";
 import { UserSigner, Mnemonic } from "@multiversx/sdk-wallet";
-import { encodeHeaderJson, decodeHeaderJson } from "../src/utils/header_utils.js";
+import { encodeHeaderJson } from "../src/utils/header_utils.js";
 import { PricingEngine } from "../src/gateway/pricing_engine.js";
 import { DEFAULT_MODEL_CATALOG } from "../src/gateway/model_catalog.js";
+
+const DEVNET_API_URL = process.env.MULTIVERSX_API_URL || "https://devnet-api.multiversx.com";
+
+interface AccountInfo {
+  address: string;
+  balance: string;
+  nonce: number;
+  shard: number;
+}
+
+async function getAccountInfo(address: string): Promise<AccountInfo> {
+  try {
+    const res = await fetch(`${DEVNET_API_URL}/accounts/${address}`);
+    if (res.ok) {
+      const data = await res.json();
+      return {
+        address: data.address || address,
+        balance: data.balance || "0",
+        nonce: data.nonce || 0,
+        shard: data.shard ?? 0,
+      };
+    }
+  } catch {
+    // fallback
+  }
+  const computer = new AddressComputer();
+  const shard = computer.getShardOfAddress(Address.newFromBech32(address));
+  return { address, balance: "0", nonce: 0, shard };
+}
 
 async function runDevnetLiveDemo() {
   console.log(`
@@ -12,41 +43,79 @@ async function runDevnetLiveDemo() {
 ================================================================================
   Protocol:          x402 v2 (HTTP 402 AI Monetization)
   Network:           MultiversX Devnet (CAIP-2: multiversx:D)
+  API Provider:      ${DEVNET_API_URL}
   Settlement Type:   Relayed V3 (100% Gasless for Agent, 0 EGLD required)
-  Asset:             USDC (Testnet Devnet Token)
+  Asset:             USDC (Testnet Devnet Token: USDC-c76f1f)
 ================================================================================
 `);
 
-  // 1. Initialize Autonomous Agent Wallet (Zero EGLD)
-  const agentMnemonic = process.env.AGENT_MNEMONIC || Mnemonic.generate().toString();
-  const agentKey = Mnemonic.fromString(agentMnemonic).deriveKey(0);
-  const agentSigner = new UserSigner(agentKey);
+  const walletsDir = path.resolve(process.cwd(), "wallets");
+
+  // 1. Resolve Agent Wallet
+  let agentSigner: UserSigner;
+  const agentPemPath = path.join(walletsDir, "agent.pem");
+  if (fs.existsSync(agentPemPath)) {
+    agentSigner = UserSigner.fromPem(fs.readFileSync(agentPemPath, "utf-8"));
+  } else {
+    const agentMnemonic = process.env.AGENT_MNEMONIC || Mnemonic.generate().toString();
+    const agentKey = Mnemonic.fromString(agentMnemonic).deriveKey(0);
+    agentSigner = new UserSigner(agentKey);
+  }
   const agentAddress = agentSigner.getAddress().bech32();
 
-  // 2. Initialize Merchant & Relayer Addresses
-  const merchantAddress =
-    process.env.MERCHANT_ADDRESS || "erd1qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq6gq4hu";
-  const relayerMnemonic = process.env.RELAYER_MNEMONIC || Mnemonic.generate().toString();
-  const relayerKey = Mnemonic.fromString(relayerMnemonic).deriveKey(0);
-  const relayerSigner = new UserSigner(relayerKey);
+  // 2. Resolve Shard & Relayer Wallet
+  const computer = new AddressComputer();
+  const agentShard = computer.getShardOfAddress(Address.newFromBech32(agentAddress));
+
+  let relayerSigner: UserSigner;
+  const relayerPemPath = path.join(walletsDir, `relayer_shard${agentShard}.pem`);
+  if (fs.existsSync(relayerPemPath)) {
+    relayerSigner = UserSigner.fromPem(fs.readFileSync(relayerPemPath, "utf-8"));
+  } else {
+    const relayerMnemonic = process.env.RELAYER_MNEMONIC || Mnemonic.generate().toString();
+    const relayerKey = Mnemonic.fromString(relayerMnemonic).deriveKey(0);
+    relayerSigner = new UserSigner(relayerKey);
+  }
   const relayerAddress = relayerSigner.getAddress().bech32();
 
-  console.log(`🤖 [1/6] Autonomous AI Agent Identity:`);
-  console.log(`   Address:    ${agentAddress}`);
-  console.log(`   Balance:    0.000000 EGLD (Agent has ZERO gas!)`);
-  console.log(`   Asset:      USDC Devnet Balance: 50.00 USDC`);
-  console.log(`   Relayer:    ${relayerAddress} (Sponsors gas fee via Relayed V3)\n`);
+  // 3. Resolve Merchant Wallet
+  const merchantPemPath = path.join(walletsDir, "merchant.pem");
+  let merchantAddress = "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k";
+  if (fs.existsSync(merchantPemPath)) {
+    merchantAddress = UserSigner.fromPem(fs.readFileSync(merchantPemPath, "utf-8")).getAddress().bech32();
+  }
 
-  // 3. User Prompt & Model Selection
+  // 4. Fetch Live On-Chain Balances & Nonces from Devnet API
+  console.log(`🔍 Querying MultiversX Devnet API for on-chain state...`);
+  const [agentAccount, relayerAccount] = await Promise.all([
+    getAccountInfo(agentAddress),
+    getAccountInfo(relayerAddress),
+  ]);
+
+  const relayerEgld = (Number(relayerAccount.balance) / 1e18).toFixed(4);
+  const agentEgld = (Number(agentAccount.balance) / 1e18).toFixed(6);
+
+  console.log(`\n🤖 [1/6] Autonomous AI Agent Identity:`);
+  console.log(`   Address:        ${agentAddress}`);
+  console.log(`   Shard:          Shard ${agentShard}`);
+  console.log(`   On-Chain Gas:   ${agentEgld} EGLD (Agent has ZERO gas!)`);
+  console.log(`   Nonce:          ${agentAccount.nonce}`);
+  console.log(`\n⚡ Relayer Sponsor (Shard ${agentShard}):`);
+  console.log(`   Address:        ${relayerAddress}`);
+  console.log(`   On-Chain Gas:   ${relayerEgld} EGLD`);
+  console.log(`   Nonce:          ${relayerAccount.nonce}`);
+  console.log(`\n🏪 Merchant Payee:`);
+  console.log(`   Address:        ${merchantAddress}\n`);
+
+  // 5. Select Model & Pricing
   const selectedModel = "anthropic/claude-sonnet-4.6";
-  const modelSpec = DEFAULT_MODEL_CATALOG.find((m) => m.id === selectedModel);
   const prompt = "Explain in 3 bullet points why MultiversX state sharding enables 10,000+ TPS for AI micropayments.";
   console.log(`💬 [2/6] Agent preparing inference request:`);
-  console.log(`   Model:      ${selectedModel}`);
-  console.log(`   Prompt:     "${prompt}"`);
-  console.log(`   Provider:   Upstream BlockRun Gateway\n`);
+  console.log(`   Model:          ${selectedModel}`);
+  console.log(`   Prompt:         "${prompt}"`);
+  console.log(`   Provider:       Upstream BlockRun Gateway\n`);
 
-  // 4. Step 1: Send Unpaid Request -> Receive HTTP 402 Challenge
+  // 6. Step 1: 402 Challenge
   console.log(`🔒 [3/6] Step 1: Agent sends unpaid POST /api/v1/chat/completions...`);
   const pricing = new PricingEngine();
   const quote = pricing.estimateCost(selectedModel, [{ role: "user", content: prompt }]);
@@ -79,14 +148,14 @@ async function runDevnetLiveDemo() {
   const encoded402 = encodeHeaderJson(challenge402);
   console.log(`   ⬅️ Received HTTP 402 Payment Required!`);
   console.log(`   Header PAYMENT-REQUIRED: ${encoded402.substring(0, 40)}...`);
-  console.log(`   Required Settlement: ${quote.usdFormatted} (${quote.microUsdc} micro-USDC)`);
-  console.log(`   Payee Merchant:      ${merchantAddress}\n`);
+  console.log(`   Required Settlement:     ${quote.usdFormatted} (${quote.microUsdc} micro-USDC)`);
+  console.log(`   Payee Merchant:          ${merchantAddress}\n`);
 
-  // 5. Step 2: Agent signs Gasless Relayed V3 MultiversX Transaction
+  // 7. Step 2: Agent Signs Relayed V3 Transaction
   console.log(`✍️ [4/6] Step 2: Agent constructs & signs Relayed V3 MultiversX Transaction:`);
-  const computer = new TransactionComputer();
+  const txComputer = new TransactionComputer();
   const agentTx = new Transaction({
-    nonce: 1n,
+    nonce: BigInt(agentAccount.nonce),
     value: 0n,
     sender: Address.newFromBech32(agentAddress),
     receiver: Address.newFromBech32(merchantAddress),
@@ -99,7 +168,7 @@ async function runDevnetLiveDemo() {
     relayer: Address.newFromBech32(relayerAddress),
   });
 
-  const bytesForAgent = computer.computeBytesForSigning(agentTx);
+  const bytesForAgent = txComputer.computeBytesForSigning(agentTx);
   const agentSignature = (await agentSigner.sign(bytesForAgent)).toString("hex");
   agentTx.signature = Buffer.from(agentSignature, "hex");
   console.log(`   Agent Signature (Ed25519): ${agentSignature.substring(0, 48)}...`);
@@ -108,7 +177,7 @@ async function runDevnetLiveDemo() {
     x402Version: 2,
     accepted: challenge402.accepts[0],
     payload: {
-      nonce: 1,
+      nonce: agentAccount.nonce,
       value: "0",
       receiver: merchantAddress,
       sender: agentAddress,
@@ -126,24 +195,51 @@ async function runDevnetLiveDemo() {
   const encodedPaymentSignature = encodeHeaderJson(paymentSignaturePayload);
   console.log(`   Encoded PAYMENT-SIGNATURE Header: ${encodedPaymentSignature.substring(0, 48)}...\n`);
 
-  // 6. Step 3: Gateway Relayer Countersigns & Broadcasts to MultiversX Devnet
+  // 8. Step 3: Relayer Countersigns & Broadcasts
   console.log(`⚡ [5/6] Step 3: BlockRun Relayer Pool sponsors gas & countersigns:`);
-  const bytesForRelayer = computer.computeBytesForSigning(agentTx);
+  const bytesForRelayer = txComputer.computeBytesForSigning(agentTx);
   const relayerSignature = (await relayerSigner.sign(bytesForRelayer)).toString("hex");
   agentTx.relayerSignature = Buffer.from(relayerSignature, "hex");
 
-  // In real devnet, broadcast to https://devnet-api.multiversx.com/transaction/send
-  // Here we compute the canonical transaction hash
-  const canonicalTxHash = computer.computeTransactionHash(agentTx);
+  const canonicalTxHash = txComputer.computeTransactionHash(agentTx);
+  console.log(`   Relayer Signature:      ${relayerSignature.substring(0, 48)}...`);
+  console.log(`   Gas Sponsor:            ${relayerAddress}`);
+  console.log(`   Canonical Tx Hash:      ${canonicalTxHash}`);
 
-  console.log(`   Relayer Signature:  ${relayerSignature.substring(0, 48)}...`);
-  console.log(`   Gas Sponsor:        ${relayerAddress} (Paid ~0.0006 EGLD network gas)`);
-  console.log(`   Broadcast Status:   ✅ INCLUDED IN DEVNET BLOCK`);
-  console.log(`   Tx Hash:            ${canonicalTxHash}`);
-  console.log(`\n   🔍 VERIFY ON MULTIVERSX DEVNET EXPLORER:`);
+  // Broadcast to Live MultiversX Devnet if Relayer is funded
+  if (BigInt(relayerAccount.balance) > 0n) {
+    console.log(`\n   📡 BROADCASTING TO PUBLIC MULTIVERSX DEVNET API...`);
+    try {
+      const txPayload = agentTx.toPlainObject();
+      const sendRes = await fetch(`${DEVNET_API_URL}/transaction/send`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(txPayload),
+      });
+
+      if (sendRes.ok) {
+        const sendData = await sendRes.json();
+        console.log(`   ✅ ON-CHAIN BROADCAST SUCCESSFUL!`);
+        console.log(`   Network Response Hash:  ${sendData.txHash}`);
+      } else {
+        const errText = await sendRes.text();
+        console.log(`   ⚠️ Devnet API Response: ${errText}`);
+      }
+    } catch (err: any) {
+      console.log(`   ⚠️ Broadcast error: ${err.message}`);
+    }
+  } else {
+    console.log(`\n   ℹ️ [AWAITING DEVNET FUNDING]:`);
+    console.log(`   The relayer address currently has 0.0000 EGLD on Devnet.`);
+    console.log(`   To broadcast live on-chain, send ~1-5 devnet EGLD to the Relayer:`);
+    console.log(`   👉 ${relayerAddress}`);
+    console.log(`   Devnet Faucet: https://devnet-wallet.multiversx.com`);
+  }
+
+  console.log(`\n   🔍 MULTIVERSX DEVNET EXPLORER LINK:`);
   console.log(`   👉 https://devnet-explorer.multiversx.com/transactions/${canonicalTxHash}\n`);
 
-  // 7. Step 4: AI Completion Token-by-Token Streaming
+  // 9. Step 4: AI Completion Streaming
   console.log(`🤖 [6/6] Step 4: Payment Settled! Upstream AI Model Streaming Response:`);
   console.log(`--------------------------------------------------------------------------------`);
 
@@ -161,7 +257,7 @@ async function runDevnetLiveDemo() {
   }
 
   console.log(`\n--------------------------------------------------------------------------------`);
-  console.log(`\n🎉 DEMONSTRATION SUCCESSFUL: Full x402 AI payment settled in 0.6s on MultiversX!`);
+  console.log(`\n🎉 DEMONSTRATION COMPLETE`);
 }
 
 runDevnetLiveDemo().catch((err) => {
