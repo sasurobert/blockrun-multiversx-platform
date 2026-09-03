@@ -1,26 +1,51 @@
 version: "3.8"
 
 services:
-  blockrun-gateway:
+  gateway:
     build:
       context: .
       dockerfile: Dockerfile
-    container_name: blockrun-mvx-gateway
     restart: unless-stopped
-    ports:
-      - "3000:3000"   # AI Gateway (OpenAI / Anthropic endpoints)
-      - "3402:3402"   # x402 Facilitator (/verify, /settle, discovery)
-    env_file:
-      - .env
+    environment:
+      - PORT=3000
+      - FACILITATOR_PORT=3402
+      - MULTIVERSX_NETWORK=${MULTIVERSX_NETWORK:-multiversx:D}
+      - MULTIVERSX_API_URL=${MULTIVERSX_API_URL:-https://devnet-api.multiversx.com}
+      - USDC_TOKEN_IDENTIFIER=${USDC_TOKEN_IDENTIFIER:-USDC-350c4e}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - RELAYER_PEM_PATH=/app/wallets/relayer_shard0.pem
     volumes:
-      - gateway-data:/app/data
+      - ./wallets:/app/wallets:ro
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://localhost:3402/health"]
-      interval: 15s
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000/health').then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
       timeout: 5s
       retries: 3
-      start_period: 10s
+    networks:
+      - blockrun-net
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - SERVER_DOMAIN=${SERVER_DOMAIN:-localhost}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      gateway:
+        condition: service_healthy
+    networks:
+      - blockrun-net
 
 volumes:
-  gateway-data:
-    driver: local
+  caddy_data:
+  caddy_config:
+
+networks:
+  blockrun-net:
+    driver: bridge

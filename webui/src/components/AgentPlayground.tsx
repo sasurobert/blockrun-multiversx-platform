@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Send, CheckCircle2, AlertCircle, ArrowRight, ShieldCheck, Cpu, Terminal, ExternalLink } from "lucide-react";
+import { API_BASE } from "../config";
 
 export const AgentPlayground: React.FC = () => {
   const [model, setModel] = useState("google/gemini-2.5-flash-lite");
@@ -33,7 +34,7 @@ export const AgentPlayground: React.FC = () => {
     setStage("settling");
 
     try {
-      const res = await fetch("/api/v1/playground/chat", {
+      const res = await fetch(`${API_BASE}/api/v1/playground/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt, model }),

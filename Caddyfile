@@ -1,0 +1,33 @@
+{
+    admin off
+}
+
+{$SERVER_DOMAIN:localhost} {
+    encode gzip zstd
+
+    # Facilitator discovery & x402 endpoints
+    handle /.well-known/x402* {
+        reverse_proxy gateway:3402
+    }
+    handle /verify* {
+        reverse_proxy gateway:3402
+    }
+    handle /settle* {
+        reverse_proxy gateway:3402
+    }
+    handle /supported* {
+        reverse_proxy gateway:3402
+    }
+    handle /facilitator-openapi.json {
+        uri replace /facilitator-openapi.json /openapi.json
+        reverse_proxy gateway:3402
+    }
+
+    # BlockRun AI Gateway & UI Dashboard
+    handle {
+        reverse_proxy gateway:3000 {
+            header_up X-Forwarded-Proto {scheme}
+            header_up X-Real-IP {remote_host}
+        }
+    }
+}

@@ -458,15 +458,20 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
         rateLimit: { windowMs: 10000, max: 2, enabled: true },
       });
 
-      const res1 = await request(rateLimitedApp).get("/health");
-      expect(res1.status).toBe(200);
+      const server = rateLimitedApp.listen(0);
+      try {
+        const res1 = await request(server).get("/health");
+        expect(res1.status).toBe(200);
 
-      const res2 = await request(rateLimitedApp).get("/health");
-      expect(res2.status).toBe(200);
+        const res2 = await request(server).get("/health");
+        expect(res2.status).toBe(200);
 
-      const res3 = await request(rateLimitedApp).get("/health");
-      expect(res3.status).toBe(429);
-      expect(res3.body.error).toContain("Too many requests");
+        const res3 = await request(server).get("/health");
+        expect(res3.status).toBe(429);
+        expect(res3.body.error).toContain("Too many requests");
+      } finally {
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+      }
     });
 
     it("should gracefully handle missing relayer pool for relayer endpoints", async () => {
@@ -479,7 +484,7 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
       const noRelayerServer = noRelayerApp.listen(0, "127.0.0.1");
       try {
         const resShards = await request(noRelayerServer).get("/relayer/shards");
-        expect(resShards.status).toBe(200);
+        expect(resShards.status, JSON.stringify(resShards.body)).toBe(200);
         expect(resShards.body.shards).toEqual([]);
 
         const resAddr = await request(noRelayerServer).get(`/relayer/address/${userAddress.toBech32()}`);
