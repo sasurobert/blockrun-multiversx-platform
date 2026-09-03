@@ -2,8 +2,8 @@ import React from "react";
 import { Zap, Cpu, Activity, ExternalLink } from "lucide-react";
 
 interface NavbarProps {
-  activeTab: "playground" | "shards" | "benchmark";
-  setActiveTab: (tab: "playground" | "shards" | "benchmark") => void;
+  activeTab: "playground" | "fleet" | "shards" | "benchmark";
+  setActiveTab: (tab: "playground" | "fleet" | "shards" | "benchmark") => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
@@ -32,29 +32,40 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         <div className="flex items-center gap-1 bg-[#151c2d] p-1 rounded-xl border border-slate-800">
           <button
             onClick={() => setActiveTab("playground")}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
+            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               activeTab === "playground"
                 ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
                 : "text-slate-400 hover:text-white"
             }`}
           >
             <Cpu className="h-4 w-4" />
-            Agent Playground
+            Playground
+          </button>
+          <button
+            onClick={() => setActiveTab("fleet")}
+            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
+              activeTab === "fleet"
+                ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Activity className="h-4 w-4 text-purple-300" />
+            Autonomous Fleet (3 Shards)
           </button>
           <button
             onClick={() => setActiveTab("shards")}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
+            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               activeTab === "shards"
                 ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
                 : "text-slate-400 hover:text-white"
             }`}
           >
             <Activity className="h-4 w-4" />
-            Shard & Relayers (24)
+            Relayers (24)
           </button>
           <button
             onClick={() => setActiveTab("benchmark")}
-            className={`px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all ${
+            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all ${
               activeTab === "benchmark"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold shadow-md shadow-cyan-500/30"
                 : "text-slate-400 hover:text-white"

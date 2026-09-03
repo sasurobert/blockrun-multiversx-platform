@@ -1,6 +1,11 @@
-import "dotenv/config";
+import dotenv from "dotenv";
+dotenv.config();
+dotenv.config({ path: ".env.local", override: true });
+
 import fs from "fs";
+import path from "path";
 import http from "http";
+import express from "express";
 import { MvxApiNetworkProvider } from "../domain/network.js";
 import { RelayerPoolManager } from "../services/relayer_pool.js";
 import { VerifierService } from "../services/verifier.js";
@@ -117,8 +122,16 @@ export async function startServers() {
     payTo: merchantPayTo,
     network,
     asset: usdcToken,
+    geminiApiKey: process.env.GEMINI_API_KEY,
     rateLimit: { enabled: rateLimitEnabled },
   });
+
+  // Serve WebUI dashboard statically if built
+  const webuiDist = path.resolve(process.cwd(), "webui/dist");
+  if (fs.existsSync(webuiDist)) {
+    console.log(`Serving WebUI dashboard from: ${webuiDist}`);
+    gatewayApp.use(express.static(webuiDist));
+  }
 
   // 7. Start HTTP Servers
   const facilitatorServer = http.createServer(facilitatorApp);

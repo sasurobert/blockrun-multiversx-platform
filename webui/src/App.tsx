@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { Navbar } from "./components/Navbar";
 import { AgentPlayground } from "./components/AgentPlayground";
+import { AgentFleet } from "./components/AgentFleet";
 import { ShardMonitor } from "./components/ShardMonitor";
 import { StressVisualizer } from "./components/StressVisualizer";
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"playground" | "shards" | "benchmark">("playground");
+  const [activeTab, setActiveTab] = useState<"playground" | "fleet" | "shards" | "benchmark">("playground");
 
   return (
     <div className="min-h-screen bg-[#080b11] text-slate-100 flex flex-col">
@@ -13,6 +14,7 @@ export const App: React.FC = () => {
 
       <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
         {activeTab === "playground" && <AgentPlayground />}
+        {activeTab === "fleet" && <AgentFleet />}
         {activeTab === "shards" && <ShardMonitor />}
         {activeTab === "benchmark" && <StressVisualizer />}
       </main>
