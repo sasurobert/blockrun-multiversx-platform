@@ -39,6 +39,8 @@ import {
 
 import { GeminiProvider } from "./gemini_provider.js";
 import { FleetService } from "../services/fleet_service.js";
+import { MerchantPoolManager } from "../services/merchant_pool.js";
+import { TreasurySweeperService } from "../services/treasury_sweeper.js";
 
 export type UpstreamAiHandler = (
   reqBody: Record<string, unknown>,
@@ -54,6 +56,8 @@ export interface BlockRunGatewayOptions {
   settlementQueue?: ISettlementQueue;
   relayerPool?: RelayerPoolManager;
   fleetService?: FleetService;
+  merchantPool?: MerchantPoolManager;
+  treasurySweeper?: TreasurySweeperService;
   geminiApiKey?: string;
   payTo: string;
   network?: string;
@@ -276,6 +280,7 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
   const assetDecimals = options.assetDecimals ?? 6;
   const maxTimeoutSeconds = options.maxTimeoutSeconds ?? 300;
   const flatFeeMicroUsdc = options.flatFeeMicroUsdc ?? FLAT_FEE_MICRO_USDC;
+  const relayerPool = options.relayerPool;
 
   const pricingEngine = new PricingEngine({
     catalog,
@@ -286,8 +291,18 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
     timeoutMs: options.upstreamTimeoutMs ?? 30000,
   });
 
+  const merchantPool = options.merchantPool || new MerchantPoolManager();
+  const treasurySweeper =
+    options.treasurySweeper ||
+    new TreasurySweeperService({
+      merchantPool,
+      masterTreasuryAddress: options.payTo,
+      tokenId: asset,
+    });
+
   const fleetService = options.fleetService ?? new FleetService({
     geminiApiKey: options.geminiApiKey || process.env.GEMINI_API_KEY,
+    merchantPool,
     merchantAddress: options.payTo,
     tokenId: asset,
   });
@@ -531,17 +546,25 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
   /**
    * POST /api/v1/playground/chat
    * Direct playground endpoint executing real on-chain Devnet Relayed V3 transaction
-   * and generating real Gemini completion.
+   * with pure intra-shard settlement (0.6s finality) and real Gemini completion.
    */
   app.post("/api/v1/playground/chat", async (req: Request, res: Response) => {
     try {
-      const { prompt, model: requestedModel } = req.body || {};
+      const { prompt, model: requestedModel, payerAddress, shard: requestedShard } = req.body || {};
       if (!prompt || typeof prompt !== "string") {
         res.status(400).json({ error: "prompt (string) is required" });
         return;
       }
 
-      const result = await fleetService.executeBotStep("bot-shard0", prompt);
+      let shard = 0;
+      if (typeof requestedShard === "number" && requestedShard >= 0 && requestedShard <= 2) {
+        shard = requestedShard;
+      } else if (payerAddress && typeof payerAddress === "string") {
+        shard = merchantPool.getShardOfAddress(payerAddress);
+      }
+
+      const botId = `bot-shard${shard}`;
+      const result = await fleetService.executeBotStep(botId, prompt);
       res.json({
         completion: result.completion,
         txHash: result.txHash,
@@ -551,9 +574,74 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
         agentEgldSpent: result.agentEgldSpent,
         usdcAmount: result.usdcAmount,
         model: requestedModel || "google/gemini-2.5-flash-lite",
+        shard,
+        senderShard: result.senderShard,
+        relayerShard: result.relayerShard,
+        receiverShard: result.receiverShard,
+        merchantAddress: result.merchantAddress,
+        executionType: result.executionType,
+        finality: result.finality,
       });
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to process playground chat";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  /**
+   * GET /api/v1/merchants
+   * Returns all 3 shard-aligned merchant receivers.
+   */
+  app.get("/api/v1/merchants", (_req: Request, res: Response) => {
+    res.json({
+      merchants: merchantPool.getAllMerchants(),
+      defaultMerchant: merchantPool.getMerchantAddressForShard(0),
+      executionType: "intra-shard",
+      finality: "0.6s (Sirius Single Round)",
+    });
+  });
+
+  /**
+   * GET /api/v1/merchants/for-payer/:address
+   * Resolves the matching shard, merchant address, and relayer address for any payer.
+   */
+  app.get("/api/v1/merchants/for-payer/:address", (req: Request, res: Response) => {
+    const info = merchantPool.getMerchantAddressForUser(req.params.address);
+    const relayer = options.relayerPool?.getRelayerAddressForShard(info.shard);
+    res.json({
+      payerAddress: req.params.address,
+      payerShard: info.shard,
+      merchantAddress: info.merchantAddress,
+      relayerAddress: relayer,
+      executionType: "intra-shard-instant",
+      finality: "0.6s (Sirius Single Round)",
+    });
+  });
+
+  /**
+   * GET /api/v1/treasury/status
+   * Real-time on-chain multi-shard merchant token balance monitor.
+   */
+  app.get("/api/v1/treasury/status", async (_req: Request, res: Response) => {
+    try {
+      const status = await treasurySweeper.getTreasuryStatus();
+      res.json(status);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to retrieve treasury status";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  /**
+   * POST /api/v1/treasury/sweep
+   * Triggers an asynchronous consolidation sweep of shard merchant balances.
+   */
+  app.post("/api/v1/treasury/sweep", async (_req: Request, res: Response) => {
+    try {
+      const result = await treasurySweeper.triggerSweep();
+      res.json(result);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to trigger treasury sweep";
       res.status(500).json({ error: message });
     }
   });
@@ -583,16 +671,43 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
       const effectiveMaxTokens = max_tokens ?? maxTokens ?? 1000;
       const cost = pricingEngine.estimateCost(model.id, messages, effectiveMaxTokens);
 
+      // Base payment requirement matching configured payTo (backward compatible with all existing tests and configs)
+      const defaultPayTo = options.payTo;
+      
+      // Determine if payer address provided in header
+      const userHeader = req.headers["x-payer"] || req.headers["x-agent-address"];
+      let userShard: number | undefined;
+      let shardAlignedPayTo = defaultPayTo;
+
+      if (typeof userHeader === "string") {
+        userShard = merchantPool.getShardOfAddress(userHeader);
+        shardAlignedPayTo = merchantPool.getMerchantAddressForShard(userShard);
+      }
+
+      let relayerAddr: string | undefined;
+      if (relayerPool && typeof userShard === "number") {
+        try {
+          if (relayerPool.hasShard(userShard)) {
+            relayerAddr = relayerPool.getRelayerAddressForShard(userShard);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       const paymentRequirements: PaymentRequirements = {
         scheme: "exact",
         network,
         amount: cost.microUsdc,
         asset,
-        payTo: options.payTo,
+        payTo: shardAlignedPayTo,
         maxTimeoutSeconds,
         extra: {
           name: assetName,
           decimals: assetDecimals,
+          shard: userShard ?? 0,
+          relayer: relayerAddr,
+          executionType: "intra-shard-0.6s",
         },
       };
 
@@ -796,16 +911,43 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
       const effectiveMaxTokens = max_tokens ?? maxTokens ?? 1000;
       const cost = pricingEngine.estimateCost(model.id, normalizedMessages, effectiveMaxTokens);
 
+      // Base payment requirement matching configured payTo (backward compatible with all existing tests and configs)
+      const defaultPayTo = options.payTo;
+      
+      // Determine if payer address provided in header
+      const userHeader = req.headers["x-payer"] || req.headers["x-agent-address"];
+      let userShard: number | undefined;
+      let shardAlignedPayTo = defaultPayTo;
+
+      if (typeof userHeader === "string") {
+        userShard = merchantPool.getShardOfAddress(userHeader);
+        shardAlignedPayTo = merchantPool.getMerchantAddressForShard(userShard);
+      }
+
+      let relayerAddr: string | undefined;
+      if (relayerPool && typeof userShard === "number") {
+        try {
+          if (relayerPool.hasShard(userShard)) {
+            relayerAddr = relayerPool.getRelayerAddressForShard(userShard);
+          }
+        } catch {
+          // ignore
+        }
+      }
+
       const paymentRequirements: PaymentRequirements = {
         scheme: "exact",
         network,
         amount: cost.microUsdc,
         asset,
-        payTo: options.payTo,
+        payTo: shardAlignedPayTo,
         maxTimeoutSeconds,
         extra: {
           name: assetName,
           decimals: assetDecimals,
+          shard: userShard ?? 0,
+          relayer: relayerAddr,
+          executionType: "intra-shard-0.6s",
         },
       };
 

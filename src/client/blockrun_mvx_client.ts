@@ -1,5 +1,5 @@
 import fs from "fs";
-import { Address, Transaction, TransactionComputer } from "@multiversx/sdk-core";
+import { Address, AddressComputer, Transaction, TransactionComputer } from "@multiversx/sdk-core";
 import { Mnemonic, UserSigner } from "@multiversx/sdk-wallet";
 import {
   PaymentRequirements,
@@ -158,6 +158,15 @@ export class BlockRunMvxClient {
   private sessionSpendUsd: number = 0;
   private localNonce: number = 0;
   private readonly transactionComputer: TransactionComputer;
+  private readonly addressComputer: AddressComputer = new AddressComputer();
+
+  public getMyShard(): number {
+    try {
+      return this.addressComputer.getShardOfAddress(this.userAddress);
+    } catch {
+      return 0;
+    }
+  }
 
   constructor(config: BlockRunClientConfig = {}) {
     this.gatewayUrl = (config.gatewayUrl ?? "http://localhost:3000").replace(/\/$/, "");
@@ -538,7 +547,9 @@ export class BlockRunMvxClient {
       try {
         const decoded = decodeHeaderJson<Record<string, unknown>>(reqHeader);
         if (decoded?.accepts && Array.isArray(decoded.accepts) && decoded.accepts.length > 0) {
-          return decoded.accepts[0] as PaymentRequirements;
+          const myShard = this.getMyShard();
+          const match = (decoded.accepts as Array<Record<string, unknown>>).find((a) => (a?.extra as Record<string, unknown>)?.shard === myShard);
+          return (match || decoded.accepts[0]) as PaymentRequirements;
         }
         if (decoded?.scheme && decoded?.amount) {
           return decoded as unknown as PaymentRequirements;
@@ -573,7 +584,9 @@ export class BlockRunMvxClient {
       try {
         const body = (await (res as { json: () => Promise<unknown> }).json()) as Record<string, unknown>;
         if (body?.accepts && Array.isArray(body.accepts) && body.accepts.length > 0) {
-          return body.accepts[0] as PaymentRequirements;
+          const myShard = this.getMyShard();
+          const match = (body.accepts as Array<Record<string, unknown>>).find((a) => (a?.extra as Record<string, unknown>)?.shard === myShard);
+          return (match || body.accepts[0]) as PaymentRequirements;
         }
         if (body?.paymentRequirements) {
           return body.paymentRequirements as PaymentRequirements;

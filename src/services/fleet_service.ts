@@ -5,6 +5,7 @@ import { Transaction, Address, TransactionComputer } from "@multiversx/sdk-core"
 import { ApiNetworkProvider } from "@multiversx/sdk-network-providers";
 import { MultiversXGasCalculator } from "./gas_calculator.js";
 import { GeminiProvider } from "../gateway/gemini_provider.js";
+import { MerchantPoolManager } from "./merchant_pool.js";
 
 export interface BotConfig {
   id: string;
@@ -34,6 +35,12 @@ export interface FleetStepResult {
   botName: string;
   shard: number;
   agentAddress: string;
+  merchantAddress: string;
+  executionType: string;
+  finality: string;
+  senderShard: number;
+  relayerShard: number;
+  receiverShard: number;
   prompt: string;
   completion: string;
   txHash: string;
@@ -49,6 +56,7 @@ export interface FleetStepResult {
 export class FleetService {
   private networkProvider: ApiNetworkProvider;
   private geminiProvider: GeminiProvider;
+  private merchantPool: MerchantPoolManager;
   private merchantAddress: string;
   private tokenId: string;
   private walletsDir: string;
@@ -59,6 +67,7 @@ export class FleetService {
   constructor(options?: {
     apiUrl?: string;
     geminiApiKey?: string;
+    merchantPool?: MerchantPoolManager;
     merchantAddress?: string;
     tokenId?: string;
     walletsDir?: string;
@@ -66,10 +75,11 @@ export class FleetService {
     const apiUrl = options?.apiUrl || process.env.MULTIVERSX_API_URL || "https://devnet-api.multiversx.com";
     this.networkProvider = new ApiNetworkProvider(apiUrl, { clientName: "blockrun-fleet" });
     this.geminiProvider = new GeminiProvider(options?.geminiApiKey || process.env.GEMINI_API_KEY);
+    this.merchantPool = options?.merchantPool || new MerchantPoolManager();
     this.merchantAddress =
       options?.merchantAddress ||
       process.env.MERCHANT_PAY_TO ||
-      "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k";
+      this.merchantPool.getMerchantAddressForShard(0);
     this.tokenId = options?.tokenId || process.env.USDC_TOKEN_IDENTIFIER || "USDC-350c4e";
     this.walletsDir = options?.walletsDir || path.resolve(process.cwd(), "wallets");
 
@@ -237,11 +247,12 @@ export class FleetService {
     const gasLimit = Number(gasCalc.gasLimit);
 
     const computer = new TransactionComputer();
+    const merchantAddress = this.merchantPool.getMerchantAddressForShard(config.shard);
     const tx = new Transaction({
       nonce: BigInt(agentNonce),
       value: 0n,
       sender: Address.newFromBech32(agentAddr),
-      receiver: Address.newFromBech32(this.merchantAddress),
+      receiver: Address.newFromBech32(merchantAddress),
       gasPrice: 1000000000n,
       gasLimit: BigInt(gasLimit),
       data: Buffer.from(dataString),
@@ -312,6 +323,12 @@ export class FleetService {
       botName: config.name,
       shard: config.shard,
       agentAddress: agentAddr,
+      merchantAddress,
+      executionType: "intra-shard",
+      finality: "0.6s (Sirius Single Round)",
+      senderShard: config.shard,
+      relayerShard: config.shard,
+      receiverShard: config.shard,
       prompt,
       completion,
       txHash,

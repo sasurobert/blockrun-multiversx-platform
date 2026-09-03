@@ -16,6 +16,8 @@ import { MemorySettlementStorage } from "../storage/memory_storage.js";
 import { ISettlementStorage } from "../storage/types.js";
 import { createFacilitatorServer } from "../server/facilitator_server.js";
 import { createBlockRunGateway } from "../gateway/blockrun_gateway.js";
+import { MerchantPoolManager } from "../services/merchant_pool.js";
+import { TreasurySweeperService } from "../services/treasury_sweeper.js";
 import { Mnemonic } from "@multiversx/sdk-wallet";
 
 /**
@@ -78,14 +80,14 @@ export async function startServers() {
     console.log(`  - Shard ${shard}: ${addr}`);
   }
 
-  // 3. Initialize Merchant PayTo Address
-  let merchantPayTo = process.env.MERCHANT_PAY_TO;
-  if (!merchantPayTo) {
-    const shard1Addr = relayerPool.hasShard(1) ? relayerPool.getRelayerAddressForShard(1) : undefined;
-    const shard0Addr = relayerPool.hasShard(0) ? relayerPool.getRelayerAddressForShard(0) : undefined;
-    merchantPayTo = shard1Addr || shard0Addr || Object.values(relayerMap)[0];
-    console.warn(`WARNING: No MERCHANT_PAY_TO provided. Defaulting to relayer address: ${merchantPayTo}`);
+  // 3. Initialize Merchant Pool (Shard-Aligned Multi-Merchant Receivers)
+  const merchantPool = new MerchantPoolManager();
+  console.log("Shard-Aligned Merchants initialized:");
+  for (const m of merchantPool.getAllMerchants()) {
+    console.log(`  - Shard ${m.shard}: ${m.address}`);
   }
+
+  let merchantPayTo = process.env.MERCHANT_PAY_TO || merchantPool.getMerchantAddressForShard(0);
 
   // 4. Initialize Settlement Storage
   let storage: ISettlementStorage;
@@ -115,6 +117,13 @@ export async function startServers() {
     relayerPool,
   });
 
+  const treasurySweeper = new TreasurySweeperService({
+    merchantPool,
+    masterTreasuryAddress: merchantPayTo,
+    tokenId: usdcToken,
+    apiUrl,
+  });
+
   // 6. Create Express Apps
   const facilitatorApp = createFacilitatorServer({
     verifier,
@@ -128,6 +137,8 @@ export async function startServers() {
     verifier,
     settlementQueue,
     relayerPool,
+    merchantPool,
+    treasurySweeper,
     payTo: merchantPayTo,
     network,
     asset: usdcToken,

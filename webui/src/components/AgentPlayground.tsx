@@ -19,8 +19,37 @@ export const AgentPlayground: React.FC = () => {
 
   const defaultAgentAddress = "erd1n2tunlzeqdezy3nz4cdz0a2r056wlsrdew8atsmst7cpd2l0fjxqsgrc6a";
   const agentAddress = connectedAddress || defaultAgentAddress;
-  const merchantAddress = "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k";
-  const relayerAddress = "erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj";
+
+  const [shardInfo, setShardInfo] = useState<{
+    payerShard: number;
+    merchantAddress: string;
+    relayerAddress: string;
+    executionType: string;
+    finality: string;
+  }>({
+    payerShard: 0,
+    merchantAddress: "erd1ka0yrspygvjtktyzxu58ufn0kujkqgx4gq2ch5ev2aqjcem9jcqqkntrmv",
+    relayerAddress: "erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj",
+    executionType: "intra-shard-instant",
+    finality: "0.6s (Sirius Single Round)",
+  });
+
+  React.useEffect(() => {
+    fetch(`${API_BASE}/api/v1/merchants/for-payer/${agentAddress}`)
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data && data.merchantAddress) {
+          setShardInfo({
+            payerShard: data.payerShard ?? 0,
+            merchantAddress: data.merchantAddress,
+            relayerAddress: data.relayerAddress || "erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj",
+            executionType: data.executionType || "intra-shard-instant",
+            finality: data.finality || "0.6s (Sirius Single Round)",
+          });
+        }
+      })
+      .catch(() => {});
+  }, [agentAddress]);
 
   const handleRunInference = async () => {
     setStage("402_challenge");
@@ -40,7 +69,7 @@ export const AgentPlayground: React.FC = () => {
       const res = await fetch(`${API_BASE}/api/v1/playground/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt, model }),
+        body: JSON.stringify({ prompt, model, payerAddress: agentAddress }),
       });
 
       if (!res.ok) {
@@ -52,6 +81,13 @@ export const AgentPlayground: React.FC = () => {
       setExplorerUrl(data.explorerUrl);
       if (data.gasSponsored) setGasSponsored(data.gasSponsored);
       if (data.agentEgldSpent) setAgentEgldSpent(data.agentEgldSpent);
+      if (data.merchantAddress) {
+        setShardInfo((prev) => ({
+          ...prev,
+          merchantAddress: data.merchantAddress,
+          payerShard: data.shard ?? prev.payerShard,
+        }));
+      }
       setStage("streaming");
 
       const responseText = data.completion;
@@ -153,26 +189,43 @@ export const AgentPlayground: React.FC = () => {
             </button>
           </div>
 
-          {/* Wallet Cards */}
-          <div className="p-4 rounded-xl bg-[#0f1523] border border-slate-800 text-xs space-y-2.5 font-mono">
+          {/* Wallet Cards & Intra-Shard Badge */}
+          <div className="p-4 rounded-xl bg-[#0f1523] border border-slate-800 text-xs space-y-3 font-mono">
+            {/* Shard-Aligned Banner */}
+            <div className="p-2.5 rounded-lg bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 font-sans flex items-center justify-between">
+              <span className="font-semibold flex items-center gap-1.5 text-[11px]">
+                <span className="h-2 w-2 rounded-full bg-emerald-400 animate-pulse" />
+                ⚡ Pure Intra-Shard (0.6s Finality)
+              </span>
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 font-mono">
+                Shard {shardInfo.payerShard} Aligned
+              </span>
+            </div>
+
             <div className="flex items-center justify-between text-slate-400">
               <span className="flex items-center gap-1.5">
                 <span>Payer:</span>
                 {isConnected ? (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-sans font-bold">Connected Wallet</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-sans font-bold">Shard {shardInfo.payerShard}</span>
                 ) : (
-                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-sans font-bold">Gasless Agent</span>
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-sans font-bold">Shard {shardInfo.payerShard}</span>
                 )}
               </span>
-              <span className="text-slate-300 truncate max-w-[180px]">{agentAddress}</span>
+              <span className="text-slate-300 truncate max-w-[180px]" title={agentAddress}>{agentAddress}</span>
             </div>
             <div className="flex items-center justify-between text-slate-400">
-              <span>Merchant:</span>
-              <span className="text-slate-300 truncate max-w-[180px]">{merchantAddress}</span>
+              <span className="flex items-center gap-1">
+                <span>Merchant:</span>
+                <span className="text-[10px] px-1 rounded bg-blue-500/20 text-blue-300 font-sans">Shard {shardInfo.payerShard}</span>
+              </span>
+              <span className="text-slate-300 truncate max-w-[180px]" title={shardInfo.merchantAddress}>{shardInfo.merchantAddress}</span>
             </div>
             <div className="flex items-center justify-between text-slate-400">
-              <span>Relayer:</span>
-              <span className="text-slate-300 truncate max-w-[180px]">{relayerAddress}</span>
+              <span className="flex items-center gap-1">
+                <span>Relayer:</span>
+                <span className="text-[10px] px-1 rounded bg-purple-500/20 text-purple-300 font-sans">Shard {shardInfo.payerShard}</span>
+              </span>
+              <span className="text-slate-300 truncate max-w-[180px]" title={shardInfo.relayerAddress}>{shardInfo.relayerAddress}</span>
             </div>
 
             {!isConnected && (
@@ -229,7 +282,7 @@ export const AgentPlayground: React.FC = () => {
                   ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                   : "bg-slate-900/40 border-slate-800 text-slate-500"
               }`}>
-                <div className="font-bold">3. Relayer Sponsor</div>
+                <div className="font-bold">3. Relayer Sponsor (Intra-Shard)</div>
                 <div className="text-[10px] mt-1">{stage === "settling" ? "Countersigning..." : stage === "streaming" || stage === "completed" ? "Gas Paid (0.6s Block)" : "Pending"}</div>
               </div>
 
