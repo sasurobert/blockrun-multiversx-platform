@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from "react";
 
-export type WalletType = "extension" | "xportal" | "webwallet" | "demo" | null;
+export type WalletType = "extension" | "xportal" | "webwallet" | "demo" | "pem" | null;
 
 export interface WalletContextType {
   isConnected: boolean;
@@ -16,6 +16,7 @@ export interface WalletContextType {
   connectDemoWallet: () => void;
   connectWebWallet: () => void;
   connectXPortal: () => void;
+  connectPemWallet: (pemContent: string) => { success: boolean; address?: string; error?: string };
   disconnect: () => void;
   refreshBalances: () => Promise<void>;
 }
@@ -82,6 +83,27 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setIsModalOpen(false);
   };
 
+  const connectPemWallet = (pemContent: string) => {
+    try {
+      // Extract erd1 address from PEM header
+      const match = pemContent.match(/BEGIN PRIVATE KEY for (erd1[a-z0-9]{58})/i) || pemContent.match(/(erd1[a-z0-9]{58})/i);
+      if (!match || !match[1]) {
+        return { success: false, error: "Invalid PEM format: No MultiversX address (erd1...) found in header." };
+      }
+
+      const extractedAddress = match[1].toLowerCase();
+      setAddress(extractedAddress);
+      setWalletType("pem");
+      localStorage.setItem("mvx_wallet_address", extractedAddress);
+      localStorage.setItem("mvx_wallet_type", "pem");
+      refreshBalances(extractedAddress);
+      setIsModalOpen(false);
+      return { success: true, address: extractedAddress };
+    } catch (err: any) {
+      return { success: false, error: err?.message || "Failed to parse PEM file." };
+    }
+  };
+
   const connectExtension = async () => {
     setIsConnecting(true);
     try {
@@ -113,11 +135,12 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   };
 
   const connectXPortal = () => {
-    setAddress("erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj");
+    const defaultAddr = "erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj";
+    setAddress(defaultAddr);
     setWalletType("xportal");
-    localStorage.setItem("mvx_wallet_address", "erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj");
+    localStorage.setItem("mvx_wallet_address", defaultAddr);
     localStorage.setItem("mvx_wallet_type", "xportal");
-    refreshBalances("erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj");
+    refreshBalances(defaultAddr);
     setIsModalOpen(false);
   };
 
@@ -146,6 +169,7 @@ export const WalletProvider: React.FC<{ children: React.ReactNode }> = ({ childr
         connectDemoWallet,
         connectWebWallet,
         connectXPortal,
+        connectPemWallet,
         disconnect,
         refreshBalances: () => refreshBalances(),
       }}
