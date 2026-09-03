@@ -4,6 +4,7 @@ import path from "path";
 import { Address, Transaction, TransactionComputer } from "@multiversx/sdk-core";
 import { UserSigner } from "@multiversx/sdk-wallet";
 import { ApiNetworkProvider } from "@multiversx/sdk-network-providers";
+import { MultiversXGasCalculator } from "../src/services/gas_calculator";
 
 const DEVNET_API = "https://devnet-api.multiversx.com";
 const TOKEN_ID = "USDC-350c4e";
@@ -67,13 +68,17 @@ async function main() {
   console.log(`Transfer Amount:       1.00 USDC (${amountMicro} micro-USDC)`);
   console.log(`Data Payload:          ${dataString}`);
 
+  // Exact gas calculation per MultiversX protocol
+  const gasEstimate = MultiversXGasCalculator.forEsdtTransfer(TOKEN_ID, amountMicro, true);
+  console.log(`Calculated Exact Gas: ${gasEstimate.gasLimit} (Move: ${gasEstimate.moveGas}, Exec: ${gasEstimate.executionGas})`);
+
   const tx = new Transaction({
     nonce: BigInt(agentAcc.nonce),
     value: 0n,
     sender: Address.newFromBech32(agentAddr),
     receiver: Address.newFromBech32(merchantAddr),
     gasPrice: 1000000000n,
-    gasLimit: 800000n, // sufficient for ESDT + Relayed extra
+    gasLimit: gasEstimate.gasLimit,
     data: Buffer.from(dataString),
     chainID: "D",
     version: 2,

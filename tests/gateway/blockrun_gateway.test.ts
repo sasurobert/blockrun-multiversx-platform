@@ -503,28 +503,23 @@ describe("BlockRun AI Gateway Proxy Server", () => {
         }),
       });
 
-      const customServer = customApp.listen(0, "127.0.0.1");
-      try {
-        const reqBody = {
-          model: "openai/gpt-5.4",
-          messages: [{ role: "user", content: "Hello upstream!" }],
-        };
+      const reqBody = {
+        model: "openai/gpt-5.4",
+        messages: [{ role: "user", content: "Hello upstream!" }],
+      };
 
-        const challenge = await request(customServer).post("/api/v1/chat/completions").send(reqBody);
-        expect(challenge.status).toBe(402);
-        const payload = await createPaymentPayload(challenge.body.accepts[0]);
+      const challenge = await request(customApp).post("/api/v1/chat/completions").send(reqBody);
+      expect(challenge.status).toBe(402);
+      const payload = await createPaymentPayload(challenge.body.accepts[0]);
 
-        const res = await request(customServer)
-          .post("/api/v1/chat/completions")
-          .set("PAYMENT-SIGNATURE", encodeHeaderJson(payload))
-          .send(reqBody);
+      const res = await request(customApp)
+        .post("/api/v1/chat/completions")
+        .set("PAYMENT-SIGNATURE", encodeHeaderJson(payload))
+        .send(reqBody);
 
-        expect(res.status).toBe(200);
-        expect(res.body.id).toBe("custom-completion-42");
-        expect(res.body.choices[0].message.content).toBe("Custom Upstream Response 🚀");
-      } finally {
-        await new Promise<void>((r) => customServer.close(() => r()));
-      }
+      expect(res.status).toBe(200);
+      expect(res.body.id).toBe("custom-completion-42");
+      expect(res.body.choices[0].message.content).toBe("Custom Upstream Response 🚀");
     });
 
     it("should timeout if upstreamAiHandler takes longer than upstreamTimeoutMs", async () => {
@@ -540,27 +535,22 @@ describe("BlockRun AI Gateway Proxy Server", () => {
         },
       });
 
-      const slowServer = slowApp.listen(0, "127.0.0.1");
-      try {
-        const reqBody = {
-          model: "openai/gpt-5.4",
-          messages: [{ role: "user", content: "Hello slow upstream!" }],
-        };
+      const reqBody = {
+        model: "openai/gpt-5.4",
+        messages: [{ role: "user", content: "Hello slow upstream!" }],
+      };
 
-        const challenge = await request(slowServer).post("/api/v1/chat/completions").send(reqBody);
-        expect(challenge.status).toBe(402);
-        const payload = await createPaymentPayload(challenge.body.accepts[0]);
+      const challenge = await request(slowApp).post("/api/v1/chat/completions").send(reqBody);
+      expect(challenge.status).toBe(402);
+      const payload = await createPaymentPayload(challenge.body.accepts[0]);
 
-        const res = await request(slowServer)
-          .post("/api/v1/chat/completions")
-          .set("PAYMENT-SIGNATURE", encodeHeaderJson(payload))
-          .send(reqBody);
+      const res = await request(slowApp)
+        .post("/api/v1/chat/completions")
+        .set("PAYMENT-SIGNATURE", encodeHeaderJson(payload))
+        .send(reqBody);
 
-        expect(res.status).toBe(504);
-        expect(res.body.error).toContain("timed out");
-      } finally {
-        await new Promise<void>((r) => slowServer.close(() => r()));
-      }
+      expect(res.status).toBe(504);
+      expect(res.body.error).toContain("timed out");
     });
 
     it("should rate limit requests when limit is exceeded", async () => {
@@ -647,27 +637,22 @@ describe("BlockRun AI Gateway Proxy Server", () => {
         },
       });
 
-      const abortServer = abortableApp.listen(0, "127.0.0.1");
-      try {
-        const reqBody = {
-          model: "openai/gpt-5.4",
-          messages: [{ role: "user", content: "Test signal" }],
-        };
+      const reqBody = {
+        model: "openai/gpt-5.4",
+        messages: [{ role: "user", content: "Test signal" }],
+      };
 
-        const challenge = await request(abortServer).post("/api/v1/chat/completions").send(reqBody);
-        const payload = await createPaymentPayload(challenge.body.accepts[0]);
+      const challenge = await request(abortableApp).post("/api/v1/chat/completions").send(reqBody);
+      const payload = await createPaymentPayload(challenge.body.accepts[0]);
 
-        const res = await request(abortServer)
-          .post("/api/v1/chat/completions")
-          .set("PAYMENT-SIGNATURE", encodeHeaderJson(payload))
-          .send(reqBody);
+      const res = await request(abortableApp)
+        .post("/api/v1/chat/completions")
+        .set("PAYMENT-SIGNATURE", encodeHeaderJson(payload))
+        .send(reqBody);
 
-        expect(res.status).toBe(504);
-        expect(receivedSignal).toBeDefined();
-        expect(receivedSignal?.aborted).toBe(true);
-      } finally {
-        await new Promise<void>((r) => abortServer.close(() => r()));
-      }
+      expect(res.status).toBe(504);
+      expect(receivedSignal).toBeDefined();
+      expect(receivedSignal?.aborted).toBe(true);
     });
   });
 });
