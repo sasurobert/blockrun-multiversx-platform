@@ -300,7 +300,7 @@ export const AgentFleet: React.FC = () => {
                 <div className="text-xs text-slate-200 leading-relaxed bg-[#141b2c] p-3 rounded-lg border border-blue-500/20">
                   <div className="flex items-center gap-1.5 text-[11px] text-cyan-400 font-bold mb-1">
                     <Sparkles className="h-3.5 w-3.5" />
-                    Google Gemini 2.5 Flash Response:
+                    Google Gemini 2.5 Flash Lite Response:
                   </div>
                   {item.completion}
                 </div>

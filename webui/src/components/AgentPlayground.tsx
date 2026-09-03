@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { Send, CheckCircle2, AlertCircle, ArrowRight, ShieldCheck, Cpu, Terminal, ExternalLink } from "lucide-react";
 
 export const AgentPlayground: React.FC = () => {
-  const [model, setModel] = useState("anthropic/claude-sonnet-4.6");
+  const [model, setModel] = useState("google/gemini-2.5-flash-lite");
   const [prompt, setPrompt] = useState(
     "Explain in 3 bullet points why MultiversX state sharding enables 10,000+ TPS for AI micropayments."
   );
@@ -111,10 +111,10 @@ export const AgentPlayground: React.FC = () => {
                 onChange={(e) => setModel(e.target.value)}
                 className="w-full bg-[#182133] border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white focus:outline-none focus:border-blue-500"
               >
+                <option value="google/gemini-2.5-flash-lite">Google Gemini 2.5 Flash Lite ($0.10 / 1M)</option>
                 <option value="anthropic/claude-sonnet-4.6">Anthropic Claude Sonnet 4.6 ($3.00 / 1M)</option>
                 <option value="openai/gpt-5.4">OpenAI GPT-5.4 ($2.50 / 1M)</option>
                 <option value="deepseek/deepseek-reasoner">DeepSeek Reasoner ($0.55 / 1M)</option>
-                <option value="google/gemini-2.5-flash-lite">Google Gemini 2.5 Flash Lite ($0.10 / 1M)</option>
               </select>
             </div>
 

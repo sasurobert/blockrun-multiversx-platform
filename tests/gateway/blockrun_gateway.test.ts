@@ -562,7 +562,7 @@ describe("BlockRun AI Gateway Proxy Server", () => {
       });
 
       const res1 = await request(rateLimitedApp).get("/health");
-      expect(res1.status).toBe(200);
+      expect(res1.status, JSON.stringify(res1.body)).toBe(200);
 
       const res2 = await request(rateLimitedApp).get("/health");
       expect(res2.status).toBe(200);
