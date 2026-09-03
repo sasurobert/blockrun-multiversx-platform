@@ -16,7 +16,9 @@ async function main() {
   const bots = fleet.getAllBots();
   console.log(`Loaded ${bots.length} autonomous bots:`);
   for (const bot of bots) {
-    console.log(`  - [Shard ${bot.shard}] ${bot.name} (${bot.address.slice(0, 10)}...${bot.address.slice(-6)})`);
+    const status = await fleet.getBotStatus(bot.id);
+    const addr = status?.address || "unknown";
+    console.log(`  - [Shard ${bot.shard}] ${bot.name} (${addr.slice(0, 10)}...${addr.slice(-6)})`);
   }
 
   const intervalSeconds = parseInt(process.argv[2] || "15", 10);

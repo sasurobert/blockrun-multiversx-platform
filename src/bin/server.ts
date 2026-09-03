@@ -57,6 +57,15 @@ export async function startServers() {
     console.log(`Initializing Relayer Pool from PEM file: ${process.env.RELAYER_PEM_PATH}...`);
     const pemContent = fs.readFileSync(process.env.RELAYER_PEM_PATH, "utf8");
     relayerPool = RelayerPoolManager.fromPem(pemContent);
+  } else if (fs.existsSync(path.join(process.cwd(), "wallets", "relayer_shard0.pem"))) {
+    const walletsDir = path.join(process.cwd(), "wallets");
+    console.log(`Auto-loading Relayer Pool from ${walletsDir}...`);
+    const pemFiles = fs.readdirSync(walletsDir).filter((f) => f.startsWith("relayer") && f.endsWith(".pem"));
+    let combinedPem = "";
+    for (const file of pemFiles) {
+      combinedPem += fs.readFileSync(path.join(walletsDir, file), "utf8") + "\n";
+    }
+    relayerPool = RelayerPoolManager.fromPem(combinedPem);
   } else {
     console.warn("WARNING: No RELAYER_MNEMONIC or RELAYER_PEM provided. Generating ephemeral relayer key for dev/test mode.");
     const devMnemonic = Mnemonic.generate();
