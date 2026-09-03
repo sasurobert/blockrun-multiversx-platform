@@ -1,8 +1,10 @@
 import React, { useState } from "react";
-import { Send, CheckCircle2, AlertCircle, ArrowRight, ShieldCheck, Cpu, Terminal, ExternalLink } from "lucide-react";
+import { Send, CheckCircle2, AlertCircle, ArrowRight, ShieldCheck, Cpu, Terminal, ExternalLink, Wallet } from "lucide-react";
 import { API_BASE } from "../config";
+import { useWallet } from "../context/WalletContext";
 
 export const AgentPlayground: React.FC = () => {
+  const { isConnected, address: connectedAddress, egldBalance, usdcBalance, openModal } = useWallet();
   const [model, setModel] = useState("google/gemini-2.5-flash-lite");
   const [prompt, setPrompt] = useState(
     "Explain in 3 bullet points why MultiversX state sharding enables 10,000+ TPS for AI micropayments."
@@ -15,7 +17,8 @@ export const AgentPlayground: React.FC = () => {
   const [streamedText, setStreamedText] = useState<string>("");
   const [quote, setQuote] = useState<{ microUsdc: number; usd: string }>({ microUsdc: 1420, usd: "$0.001420" });
 
-  const agentWallet = "erd1n2tunlzeqdezy3nz4cdz0a2r056wlsrdew8atsmst7cpd2l0fjxqsgrc6a";
+  const defaultAgentAddress = "erd1n2tunlzeqdezy3nz4cdz0a2r056wlsrdew8atsmst7cpd2l0fjxqsgrc6a";
+  const agentAddress = connectedAddress || defaultAgentAddress;
   const merchantAddress = "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k";
   const relayerAddress = "erd1tswfs5f472p88lhmge99l22e952m4sfe7307jugzz0578usqdnyqdf9cwj";
 
@@ -153,17 +156,34 @@ export const AgentPlayground: React.FC = () => {
           {/* Wallet Cards */}
           <div className="p-4 rounded-xl bg-[#0f1523] border border-slate-800 text-xs space-y-2.5 font-mono">
             <div className="flex items-center justify-between text-slate-400">
-              <span>Agent:</span>
-              <span className="text-slate-300 truncate max-w-[200px]">{agentAddress}</span>
+              <span className="flex items-center gap-1.5">
+                <span>Payer:</span>
+                {isConnected ? (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-emerald-500/20 text-emerald-300 font-sans font-bold">Connected Wallet</span>
+                ) : (
+                  <span className="text-[10px] px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 font-sans font-bold">Gasless Agent</span>
+                )}
+              </span>
+              <span className="text-slate-300 truncate max-w-[180px]">{agentAddress}</span>
             </div>
             <div className="flex items-center justify-between text-slate-400">
               <span>Merchant:</span>
-              <span className="text-slate-300 truncate max-w-[200px]">{merchantAddress}</span>
+              <span className="text-slate-300 truncate max-w-[180px]">{merchantAddress}</span>
             </div>
             <div className="flex items-center justify-between text-slate-400">
               <span>Relayer:</span>
-              <span className="text-slate-300 truncate max-w-[200px]">{relayerAddress}</span>
+              <span className="text-slate-300 truncate max-w-[180px]">{relayerAddress}</span>
             </div>
+
+            {!isConnected && (
+              <button
+                onClick={openModal}
+                className="w-full mt-2 pt-2 border-t border-slate-800/80 text-[11px] text-cyan-400 hover:text-cyan-300 flex items-center justify-center gap-1 transition-colors font-sans"
+              >
+                <Wallet className="h-3 w-3" />
+                Connect MultiversX Wallet (xPortal / DeFi Wallet)
+              </button>
+            )}
           </div>
         </div>
 
