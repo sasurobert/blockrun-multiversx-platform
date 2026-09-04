@@ -1,0 +1,26 @@
+{
+  "IdentityRegistry": {
+    "name": "IdentityRegistry",
+    "txHash": "2cc031b790322fe7cafd74878bb6d06e3fac867c6cbf2d59082616cbd6ed6dd0",
+    "contractAddress": "erd1qqqqqqqqqqqqqpgqv6tg60zdpsn9xymn590jv68vqt9vwzkldnyqdu7yjz",
+    "explorerUrl": "https://devnet-explorer.multiversx.com/accounts/erd1qqqqqqqqqqqqqpgqv6tg60zdpsn9xymn590jv68vqt9vwzkldnyqdu7yjz"
+  },
+  "ValidationRegistry": {
+    "name": "ValidationRegistry",
+    "txHash": "bafad1995f9df97ac9caac6af2eba1ca20529b6c8a81bc2ce9104f51efa99c0e",
+    "contractAddress": "erd1qqqqqqqqqqqqqpgqhw2mr60zz9w75hxg65era570zfjsv5mednyqjcr4x2",
+    "explorerUrl": "https://devnet-explorer.multiversx.com/accounts/erd1qqqqqqqqqqqqqpgqhw2mr60zz9w75hxg65era570zfjsv5mednyqjcr4x2"
+  },
+  "ReputationRegistry": {
+    "name": "ReputationRegistry",
+    "txHash": "49526ff0593e9014f638bafca49260caa23a51b5e8e5763e91e71be0dc09a601",
+    "contractAddress": "erd1qqqqqqqqqqqqqpgqvj462tzng7nz4muwd89lz76cxdc03hd2dnyqus85yp",
+    "explorerUrl": "https://devnet-explorer.multiversx.com/accounts/erd1qqqqqqqqqqqqqpgqvj462tzng7nz4muwd89lz76cxdc03hd2dnyqus85yp"
+  },
+  "Escrow": {
+    "name": "Escrow",
+    "txHash": "d42787e51436a8460ae99415769fefb60a7008acd768a312e42c1f61fcb6eef5",
+    "contractAddress": "erd1qqqqqqqqqqqqqpgqk7swalt07etnv23c73gysha9fnd4r5l9dnyqd86nq7",
+    "explorerUrl": "https://devnet-explorer.multiversx.com/accounts/erd1qqqqqqqqqqqqqpgqk7swalt07etnv23c73gysha9fnd4r5l9dnyqd86nq7"
+  }
+}

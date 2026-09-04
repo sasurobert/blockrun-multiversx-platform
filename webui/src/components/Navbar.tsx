@@ -1,10 +1,12 @@
 import React from "react";
-import { Zap, Cpu, Activity, ExternalLink, Wallet, LogOut } from "lucide-react";
+import { Zap, Cpu, Activity, ExternalLink, Wallet, LogOut, Gauge, Wrench, ShieldAlert } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 
+export type TabType = "playground" | "claw" | "mcp" | "tollbooth" | "fleet" | "shards" | "benchmark";
+
 interface NavbarProps {
-  activeTab: "playground" | "fleet" | "shards" | "benchmark";
-  setActiveTab: (tab: "playground" | "fleet" | "shards" | "benchmark") => void;
+  activeTab: TabType;
+  setActiveTab: (tab: TabType) => void;
 }
 
 export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
@@ -37,47 +39,80 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
         <div className="flex items-center gap-1 bg-[#151c2d] p-1 rounded-xl border border-slate-800 overflow-x-auto">
           <button
             onClick={() => setActiveTab("playground")}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
               activeTab === "playground"
                 ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <Cpu className="h-4 w-4" />
+            <Cpu className="h-3.5 w-3.5" />
             Playground
           </button>
           <button
-            onClick={() => setActiveTab("fleet")}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap ${
-              activeTab === "fleet"
+            onClick={() => setActiveTab("claw")}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === "claw"
+                ? "bg-amber-500 text-black font-bold shadow-md shadow-amber-500/30"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Gauge className="h-3.5 w-3.5" />
+            ClawRouter
+          </button>
+          <button
+            onClick={() => setActiveTab("mcp")}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === "mcp"
+                ? "bg-cyan-500 text-black font-bold shadow-md shadow-cyan-500/30"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Wrench className="h-3.5 w-3.5" />
+            MCP Tools
+          </button>
+          <button
+            onClick={() => setActiveTab("tollbooth")}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === "tollbooth"
                 ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <Activity className="h-4 w-4 text-purple-300" />
-            Autonomous Fleet
+            <ShieldAlert className="h-3.5 w-3.5" />
+            Tollbooth
+          </button>
+          <button
+            onClick={() => setActiveTab("fleet")}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === "fleet"
+                ? "bg-indigo-600 text-white shadow-md shadow-indigo-600/30"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <Activity className="h-3.5 w-3.5 text-indigo-300" />
+            Fleet
           </button>
           <button
             onClick={() => setActiveTab("shards")}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
               activeTab === "shards"
                 ? "bg-blue-600 text-white shadow-md shadow-blue-600/30"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <Activity className="h-4 w-4" />
+            <Activity className="h-3.5 w-3.5" />
             Relayers
           </button>
           <button
             onClick={() => setActiveTab("benchmark")}
-            className={`px-3 py-2 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap ${
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
               activeTab === "benchmark"
                 ? "bg-gradient-to-r from-cyan-500 to-blue-600 text-black font-bold shadow-md shadow-cyan-500/30"
                 : "text-slate-400 hover:text-white"
             }`}
           >
-            <Zap className="h-4 w-4" />
-            10k TPS Engine
+            <Zap className="h-3.5 w-3.5" />
+            10k TPS
           </button>
         </div>
 

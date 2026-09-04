@@ -43,6 +43,7 @@ export interface SettlementQueueConfig {
  */
 export interface ISettlementQueue {
   enqueue(request: SettleRequest): Promise<SettleResponse>;
+  settle(request: SettleRequest): Promise<SettleResponse>;
   getPendingCount(shard?: number): number;
   getShardStats(): Record<number, ShardQueueStats>;
   drain(): Promise<void>;
@@ -373,6 +374,13 @@ export class SettlementQueue implements ISettlementQueue {
     } catch {
       return 0; // Default to shard 0 if unparseable
     }
+  }
+
+  /**
+   * Settles a payment request (alias to enqueue).
+   */
+  async settle(request: SettleRequest): Promise<SettleResponse> {
+    return this.enqueue(request);
   }
 
   /**

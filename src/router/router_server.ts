@@ -1,4 +1,5 @@
 import express, { Express, Request, Response } from "express";
+import cors from "cors";
 import crypto from "crypto";
 import { ArbitrageMatrix } from "./arbitrage_matrix.js";
 import { ModelMapper } from "./model_mapper.js";
@@ -51,6 +52,7 @@ export class ClawRouterServer {
     this.network = options.network ?? "multiversx:1";
 
     this.app = express();
+    this.app.use(cors());
     this.app.use(express.json());
     this.registerRoutes();
   }
@@ -68,8 +70,42 @@ export class ClawRouterServer {
       });
     });
 
+    this.app.get("/api/v1/claw/matrix", (_req: Request, res: Response) => {
+      res.json({
+        providers: this.matrix.getAllProviders(),
+      });
+    });
+
+    this.app.get("/api/v1/claw/speedometer", (_req: Request, res: Response) => {
+      const providers = this.matrix.getAllProviders().map((p) => ({
+        id: p.id,
+        name: p.name,
+        endpoint: p.endpoint,
+        avgTtftMs: p.avgTtftMs,
+        tokensPerSecond: p.tokensPerSecond,
+        costPerMillionInputTokensUsd: p.costPerMillionInputTokensUsd,
+        costPerMillionOutputTokensUsd: p.costPerMillionOutputTokensUsd,
+        healthy: p.healthy,
+        supportedModels: p.supportedModels,
+        p50LatencyMs: Math.round(p.avgTtftMs * 0.92),
+        p99LatencyMs: Math.round(p.avgTtftMs * 1.35),
+        errorRate: p.healthy ? 0.001 : 0.99,
+        circuitBreaker: p.healthy ? "CLOSED" : "OPEN",
+      }));
+      res.json({
+        timestamp: Date.now(),
+        providers,
+        summary: {
+          totalProviders: providers.length,
+          healthyProviders: providers.filter((p) => p.healthy).length,
+          fastestProvider: providers.reduce((prev, curr) => (curr.avgTtftMs < prev.avgTtftMs ? curr : prev), providers[0])?.name,
+          cheapestProvider: providers.reduce((prev, curr) => (curr.costPerMillionInputTokensUsd < prev.costPerMillionInputTokensUsd ? curr : prev), providers[0])?.name,
+        },
+      });
+    });
+
     // Chat completions with sub-second arbitrage & cascading fallback
-    this.app.post("/api/v1/claw/chat/completions", async (req: Request, res: Response) => {
+    this.app.post(["/api/v1/claw/chat/completions", "/v1/chat/completions"], async (req: Request, res: Response) => {
       const chatReq = req.body as ClawChatRequest;
       if (!chatReq?.model || !chatReq?.messages) {
         return res.status(400).json({ error: "Missing model or messages in request body" });

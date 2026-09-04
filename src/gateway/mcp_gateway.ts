@@ -1,4 +1,5 @@
 import express, { Express, Request, Response } from "express";
+import cors from "cors";
 import crypto from "crypto";
 import { McpRegistryAdapter } from "../services/mcp_registry_adapter.js";
 import { McpExecutor } from "../services/mcp_executor.js";
@@ -7,6 +8,7 @@ import { IVerifierService } from "../services/verifier.js";
 import { ReputationClient } from "../services/reputation_client.js";
 import { McpProofLogger } from "../services/mcp_proof_logger.js";
 import { PipelinedSettlementQueue } from "../services/pipelined_settlement_queue.js";
+import { SettlementQueue } from "../services/settlement_queue.js";
 import {
   McpRpcRequestSchema,
   McpToolsListResponse,
@@ -20,7 +22,7 @@ export interface McpGatewayOptions {
   verifier: IVerifierService;
   reputationClient?: ReputationClient;
   proofLogger?: McpProofLogger;
-  settlementQueue?: PipelinedSettlementQueue;
+  settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
   network?: string;
 }
 
@@ -32,7 +34,7 @@ export class McpGateway {
   public verifier: IVerifierService;
   public reputationClient?: ReputationClient;
   public proofLogger?: McpProofLogger;
-  public settlementQueue?: PipelinedSettlementQueue;
+  public settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
   public network: string;
 
   constructor(options: McpGatewayOptions) {
@@ -46,6 +48,7 @@ export class McpGateway {
     this.network = options.network ?? "multiversx:1";
 
     this.app = express();
+    this.app.use(cors());
     this.app.use(express.json());
     this.registerRoutes();
   }

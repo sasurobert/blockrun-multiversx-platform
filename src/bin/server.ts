@@ -18,6 +18,8 @@ import { createFacilitatorServer } from "../server/facilitator_server.js";
 import { createBlockRunGateway } from "../gateway/blockrun_gateway.js";
 import { MerchantPoolManager } from "../services/merchant_pool.js";
 import { TreasurySweeperService } from "../services/treasury_sweeper.js";
+import { TollboothServer } from "../tollbooth/tollbooth_server.js";
+import { PipelinedSettlementQueue } from "../services/pipelined_settlement_queue.js";
 import { Mnemonic } from "@multiversx/sdk-wallet";
 
 /**
@@ -29,7 +31,7 @@ export async function startServers() {
   const network = process.env.MULTIVERSX_NETWORK || "multiversx:1";
   const apiUrl = process.env.MULTIVERSX_API_URL || "https://api.multiversx.com";
   const usdcToken = process.env.USDC_TOKEN_IDENTIFIER || "USDC-c76f1f";
-  const sqliteDbPath = process.env.SQLITE_DB_PATH;
+  const sqliteDbPath = process.env.SQLITE_DB_PATH || "./data/settlements.db";
   const rateLimitEnabled = process.env.RATE_LIMIT_ENABLED !== "false";
 
   console.log("=================================================");
@@ -145,6 +147,15 @@ export async function startServers() {
     geminiApiKey: process.env.GEMINI_API_KEY,
     rateLimit: { enabled: rateLimitEnabled },
   });
+
+  // Mount Anti-Bot Scraper Tollbooth
+  const tollbooth = new TollboothServer({
+    verifier,
+    settlementQueue,
+    network,
+    originUrl: `http://localhost:${gatewayPort}`,
+  });
+  gatewayApp.use("/tollbooth", tollbooth.app);
 
   // Serve WebUI dashboard statically if built
   const webuiDist = path.resolve(process.cwd(), "webui/dist");

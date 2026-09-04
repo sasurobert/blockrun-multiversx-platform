@@ -4,6 +4,14 @@
   "outputDirectory": "dist",
   "rewrites": [
     {
+      "source": "/mcp/:path*",
+      "destination": "https://blockrun.178-105-84-73.sslip.io/mcp/:path*"
+    },
+    {
+      "source": "/tollbooth/:path*",
+      "destination": "https://blockrun.178-105-84-73.sslip.io/tollbooth/:path*"
+    },
+    {
       "source": "/api/:path*",
       "destination": "https://blockrun.178-105-84-73.sslip.io/api/:path*"
     },

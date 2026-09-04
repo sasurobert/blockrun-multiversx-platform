@@ -1,15 +1,18 @@
 import React, { useState } from "react";
-import { Navbar } from "./components/Navbar";
+import { Navbar, TabType } from "./components/Navbar";
 import { AgentPlayground } from "./components/AgentPlayground";
 import { AgentFleet } from "./components/AgentFleet";
 import { ShardMonitor } from "./components/ShardMonitor";
 import { StressVisualizer } from "./components/StressVisualizer";
+import { ClawSpeedometer } from "./components/ClawSpeedometer";
+import { McpMarketplace } from "./components/McpMarketplace";
+import { TollboothDashboard } from "./components/TollboothDashboard";
 import { WalletProvider } from "./context/WalletContext";
 import { WalletModal } from "./components/WalletModal";
 import { ErrorBoundary } from "./components/ErrorBoundary";
 
 export const App: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<"playground" | "fleet" | "shards" | "benchmark">("playground");
+  const [activeTab, setActiveTab] = useState<TabType>("playground");
 
   return (
     <ErrorBoundary>
@@ -19,6 +22,9 @@ export const App: React.FC = () => {
 
           <main className="flex-1 max-w-7xl w-full mx-auto px-4 sm:px-6 lg:px-8 py-8">
             {activeTab === "playground" && <AgentPlayground />}
+            {activeTab === "claw" && <ClawSpeedometer />}
+            {activeTab === "mcp" && <McpMarketplace />}
+            {activeTab === "tollbooth" && <TollboothDashboard />}
             {activeTab === "fleet" && <AgentFleet />}
             {activeTab === "shards" && <ShardMonitor />}
             {activeTab === "benchmark" && <StressVisualizer />}

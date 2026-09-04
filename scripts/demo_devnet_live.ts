@@ -8,6 +8,8 @@ import { PricingEngine } from "../src/gateway/pricing_engine.js";
 import { DEFAULT_MODEL_CATALOG } from "../src/gateway/model_catalog.js";
 
 const DEVNET_API_URL = process.env.MULTIVERSX_API_URL || "https://devnet-api.multiversx.com";
+const USDC_TOKEN = process.env.USDC_TOKEN_IDENTIFIER || "USDC-350c4e";
+const USDC_TOKEN_HEX = Buffer.from(USDC_TOKEN).toString("hex");
 
 interface AccountInfo {
   address: string;
@@ -127,7 +129,7 @@ async function runDevnetLiveDemo() {
         scheme: "exact",
         network: "multiversx:D",
         amount: quote.microUsdc,
-        asset: "USDC-c76f1f",
+        asset: USDC_TOKEN,
         payTo: merchantAddress,
         maxTimeoutSeconds: 300,
         extra: {
@@ -153,6 +155,7 @@ async function runDevnetLiveDemo() {
 
   // 7. Step 2: Agent Signs Relayed V3 Transaction
   console.log(`✍️ [4/6] Step 2: Agent constructs & signs Relayed V3 MultiversX Transaction:`);
+  const txDataStr = `ESDTTransfer@${USDC_TOKEN_HEX}@${Number(quote.microUsdc).toString(16).padStart(2, "0")}`;
   const txComputer = new TransactionComputer();
   const agentTx = new Transaction({
     nonce: BigInt(agentAccount.nonce),
@@ -161,7 +164,7 @@ async function runDevnetLiveDemo() {
     receiver: Address.newFromBech32(merchantAddress),
     gasPrice: 1000000000n,
     gasLimit: 600000n,
-    data: Buffer.from(`ESDTTransfer@555344432d633736663166@${Number(quote.microUsdc).toString(16).padStart(4, "0")}`),
+    data: Buffer.from(txDataStr),
     chainID: "D",
     version: 2,
     options: 0,
@@ -183,7 +186,7 @@ async function runDevnetLiveDemo() {
       sender: agentAddress,
       gasPrice: 1000000000,
       gasLimit: 600000,
-      data: `ESDTTransfer@555344432d633736663166@${Number(quote.microUsdc).toString(16).padStart(4, "0")}`,
+      data: txDataStr,
       chainID: "D",
       version: 2,
       options: 0,

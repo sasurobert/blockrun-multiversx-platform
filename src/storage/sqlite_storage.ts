@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import Database, { Database as DatabaseType } from "better-sqlite3";
 import {
   ISettlementStorage,
@@ -32,6 +34,12 @@ export class SqliteSettlementStorage implements ISettlementStorage {
 
   constructor(dbPathOrDb: string | DatabaseType = ":memory:") {
     if (typeof dbPathOrDb === "string") {
+      if (dbPathOrDb !== ":memory:") {
+        const dir = path.dirname(dbPathOrDb);
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+      }
       this.db = new Database(dbPathOrDb);
     } else {
       this.db = dbPathOrDb;

@@ -21,7 +21,11 @@
   "scripts": {
     "build": "tsc",
     "start": "node dist/bin/server.js",
+    "start:mcp": "node dist/bin/mcp_server.js",
+    "start:claw": "node dist/bin/claw_router.js",
     "dev": "tsx watch src/bin/server.ts",
+    "dev:mcp": "tsx watch src/bin/mcp_server.ts",
+    "dev:claw": "tsx watch src/bin/claw_router.ts",
     "example": "tsx examples/blockrun_agent_demo.ts",
     "benchmark:10k": "tsx src/benchmark/run_10k_benchmark.ts",
     "fleet": "tsx scripts/run_autonomous_fleet.ts",
