@@ -1,0 +1,21 @@
+version: "3.8"
+
+services:
+  mcp-gateway:
+    build:
+      context: .
+      dockerfile: Dockerfile.mcp
+    ports:
+      - "3500:3500"
+    environment:
+      - NODE_ENV=production
+      - PORT=3500
+      - MULTIVERSX_NETWORK=multiversx:1
+      - MULTIVERSX_API_URL=https://api.multiversx.com
+      - USDC_TOKEN_IDENTIFIER=USDC-c76f1f
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3500/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3

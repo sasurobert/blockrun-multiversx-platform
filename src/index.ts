@@ -22,3 +22,34 @@ export * from "./services/fleet_service.js";
 export * from "./gateway/gemini_provider.js";
 export * from "./client/errors.js";
 export * from "./client/blockrun_mvx_client.js";
+
+// Product 1: x402-mcp-gateway
+export * from "./domain/mcp_types.js";
+export * from "./services/mcp_registry_adapter.js";
+export * from "./services/mcp_executor.js";
+export * from "./services/mcp_proof_logger.js";
+export * from "./services/mcp_escrow_adapter.js";
+export * from "./services/reputation_client.js";
+export * from "./gateway/mcp_gateway.js";
+export * from "./server/mcp_server.js";
+
+// Product 2: x402-tollbooth
+export * from "./tollbooth/types.js";
+export * from "./tollbooth/bot_classifier.js";
+export * from "./tollbooth/markdown_extractor.js";
+export * from "./tollbooth/toll_pricing_engine.js";
+export * from "./tollbooth/tollbooth_server.js";
+export * from "./tollbooth/reputation_adapter.js";
+export * from "./tollbooth/abuse_reporter.js";
+export * from "./client/scraper_client.js";
+
+// Product 3: multiversx-claw-router
+export * from "./router/types.js";
+export * from "./router/arbitrage_matrix.js";
+export * from "./router/model_mapper.js";
+export * from "./router/fallback_dispatcher.js";
+export * from "./router/arbitrage_pricing.js";
+export * from "./router/router_server.js";
+export * from "./router/two_phase_reconciler.js";
+export * from "./router/node_registry_adapter.js";
+export * from "./router/sla_slasher.js";

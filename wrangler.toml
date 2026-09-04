@@ -1,0 +1,8 @@
+name = "x402-tollbooth-edge"
+main = "src/tollbooth/edge/worker.ts"
+compatibility_date = "2024-09-01"
+
+[vars]
+MERCHANT_SHARD_0 = "erd1ka0yrspygvjtktyzxu58ufn0kujkqgx4gq2ch5ev2aqjcem9jcqqkntrmv"
+FACILITATOR_URL = "https://facilitator.blockrun.ai"
+ORIGIN_URL = "https://docs.multiversx.com"

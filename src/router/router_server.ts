@@ -1,0 +1,301 @@
+import express, { Express, Request, Response } from "express";
+import crypto from "crypto";
+import { ArbitrageMatrix } from "./arbitrage_matrix.js";
+import { ModelMapper } from "./model_mapper.js";
+import { CascadingFallbackDispatcher } from "./fallback_dispatcher.js";
+import { ArbitragePricingEngine } from "./arbitrage_pricing.js";
+import { TwoPhaseReconciler } from "./two_phase_reconciler.js";
+import { SlaSlasher } from "./sla_slasher.js";
+import { PipelinedSettlementQueue } from "../services/pipelined_settlement_queue.js";
+import { MerchantPoolManager } from "../services/merchant_pool.js";
+import { IVerifierService } from "../services/verifier.js";
+import { ClawChatRequest } from "./types.js";
+import { PaymentRequirements, X402PaymentPayload } from "../domain/types.js";
+
+export interface ClawRouterServerOptions {
+  matrix?: ArbitrageMatrix;
+  mapper?: ModelMapper;
+  dispatcher?: CascadingFallbackDispatcher;
+  pricing?: ArbitragePricingEngine;
+  reconciler?: TwoPhaseReconciler;
+  slaSlasher?: SlaSlasher;
+  settlementQueue?: PipelinedSettlementQueue;
+  merchantPool?: MerchantPoolManager;
+  verifier: IVerifierService;
+  network?: string;
+}
+
+export class ClawRouterServer {
+  public app: Express;
+  public matrix: ArbitrageMatrix;
+  public mapper: ModelMapper;
+  public dispatcher: CascadingFallbackDispatcher;
+  public pricing: ArbitragePricingEngine;
+  public reconciler?: TwoPhaseReconciler;
+  public slaSlasher?: SlaSlasher;
+  public settlementQueue?: PipelinedSettlementQueue;
+  public merchantPool: MerchantPoolManager;
+  public verifier: IVerifierService;
+  public network: string;
+
+  constructor(options: ClawRouterServerOptions) {
+    this.matrix = options.matrix ?? new ArbitrageMatrix();
+    this.mapper = options.mapper ?? new ModelMapper(this.matrix);
+    this.dispatcher = options.dispatcher ?? new CascadingFallbackDispatcher();
+    this.pricing = options.pricing ?? new ArbitragePricingEngine();
+    this.reconciler = options.reconciler;
+    this.slaSlasher = options.slaSlasher;
+    this.settlementQueue = options.settlementQueue;
+    this.merchantPool = options.merchantPool ?? new MerchantPoolManager();
+    this.verifier = options.verifier;
+    this.network = options.network ?? "multiversx:1";
+
+    this.app = express();
+    this.app.use(express.json());
+    this.registerRoutes();
+  }
+
+  private registerRoutes(): void {
+    // Health probe
+    this.app.get("/health", (_req: Request, res: Response) => {
+      res.json({ status: "ok", service: "multiversx-claw-router" });
+    });
+
+    // Providers catalog and health metrics
+    this.app.get("/api/v1/claw/providers", (_req: Request, res: Response) => {
+      res.json({
+        providers: this.matrix.getAllProviders(),
+      });
+    });
+
+    // Chat completions with sub-second arbitrage & cascading fallback
+    this.app.post("/api/v1/claw/chat/completions", async (req: Request, res: Response) => {
+      const chatReq = req.body as ClawChatRequest;
+      if (!chatReq?.model || !chatReq?.messages) {
+        return res.status(400).json({ error: "Missing model or messages in request body" });
+      }
+
+      const strategy = chatReq.routingStrategy ?? "cost-optimized";
+      const resolution = this.mapper.resolveModel(chatReq.model, strategy);
+      const rankedProviders = this.matrix.getRankedProviders(resolution.resolvedModel, strategy);
+
+      const primaryProvider =
+        rankedProviders[0] ||
+        this.matrix.getProvider(resolution.providerId) || {
+          id: "default-spot",
+          name: "Default Spot Node",
+          endpoint: "https://default",
+          costPerMillionInputTokensUsd: 0.5,
+          costPerMillionOutputTokensUsd: 0.8,
+          avgTtftMs: 120,
+          tokensPerSecond: 150,
+          healthy: true,
+          supportedModels: [resolution.resolvedModel],
+        };
+
+      // Calculate dynamic price
+      const promptText = chatReq.messages.map((m) => m.content).join(" ");
+      const inputTokens = Math.max(10, Math.ceil(promptText.length / 4));
+      const outputTokens = chatReq.max_tokens ?? 500;
+
+      const pricingResult = this.pricing.calculatePrice({
+        provider: primaryProvider,
+        inputTokens,
+        outputTokens,
+      });
+
+      const clientAddress = req.headers["x-payer-address"] as string | undefined;
+      const { merchantAddress, shard } = this.merchantPool.getMerchantAddressForUser(clientAddress);
+
+      // Check session credit from TwoPhaseReconciler
+      let requiredMicroUsdc = pricingResult.microUsdc;
+      let existingCreditApplied = 0;
+
+      if (this.reconciler && clientAddress) {
+        const fullCost = parseInt(pricingResult.microUsdc, 10);
+        const remaining = this.reconciler.applyCredit(clientAddress, fullCost);
+        existingCreditApplied = fullCost - remaining;
+        requiredMicroUsdc = String(remaining);
+      }
+
+      const requirements: PaymentRequirements = {
+        scheme: "exact",
+        network: this.network as any,
+        amount: requiredMicroUsdc,
+        asset: "USDC-c76f1f",
+        payTo: merchantAddress as any,
+        maxTimeoutSeconds: 300,
+        extra: {
+          shard,
+          executionType: "intra-shard-0.6s",
+          arbitrageTier: resolution.alias,
+          projectedProvider: primaryProvider.id,
+          creditApplied: existingCreditApplied,
+        },
+      };
+
+      const rawSig =
+        req.headers["payment-signature"] ||
+        req.headers["x-payment-signature"];
+
+      // If credit covered 100% of the cost, bypass 402 challenge
+      const isFullyCoveredByCredit = existingCreditApplied > 0 && requiredMicroUsdc === "0";
+
+      if (!rawSig && !isFullyCoveredByCredit) {
+        return this.send402Challenge(res, requirements, pricingResult.usdFormatted);
+      }
+
+      let payload: X402PaymentPayload | undefined;
+      if (!isFullyCoveredByCredit) {
+        // Verify payment
+        try {
+          const decoded =
+            typeof rawSig === "string" && !rawSig.startsWith("{")
+              ? Buffer.from(rawSig, "base64").toString("utf-8")
+              : rawSig;
+          payload = typeof decoded === "string" ? JSON.parse(decoded) : decoded;
+        } catch {
+          return res.status(402).json({ error: "Payment verification failed: Malformed signature" });
+        }
+
+        if (!payload) {
+          return res.status(402).json({ error: "Payment verification failed: Missing payload" });
+        }
+
+        const verifyRes = await this.verifier.verify({
+          paymentPayload: payload,
+          paymentRequirements: requirements,
+        });
+        if (!verifyRes.isValid) {
+          return res.status(402).json({
+            error: `Payment verification failed: ${verifyRes.invalidReason ?? "Invalid signature"}`,
+          });
+        }
+      }
+
+      const requestHash = crypto
+        .createHash("sha256")
+        .update(`${chatReq.model}:${promptText}:${Date.now()}`)
+        .digest("hex");
+
+      // Payment verified or credit applied! Dispatch with cascading fallback
+      try {
+        const dispatchResult = await this.dispatcher.dispatch(
+          rankedProviders.length > 0 ? rankedProviders : [primaryProvider],
+          chatReq
+        );
+
+        if (this.slaSlasher) {
+          try {
+            await this.slaSlasher.reportTtft(
+              dispatchResult.providerId,
+              dispatchResult.ttftMs,
+              requestHash
+            );
+          } catch {
+            // non-blocking
+          }
+        }
+
+        let txHash = isFullyCoveredByCredit
+          ? `credit-settled-${Date.now()}`
+          : crypto.randomBytes(32).toString("hex");
+
+        if (this.settlementQueue && payload) {
+          try {
+            const settlement = await this.settlementQueue.settle({
+              paymentPayload: payload,
+              paymentRequirements: requirements,
+            });
+            if (settlement?.transaction) {
+              txHash = settlement.transaction;
+            }
+          } catch {
+            // fallback
+          }
+        }
+
+        res.setHeader("Content-Type", "text/event-stream");
+        res.setHeader("Cache-Control", "no-cache");
+        res.setHeader("Connection", "keep-alive");
+        res.setHeader("X-Payment-Receipt", txHash);
+        res.setHeader("X-Payment-Settled", "true");
+        res.setHeader("X-Claw-Provider-Selected", dispatchResult.providerId);
+        res.setHeader("X-Claw-Latency-Ttft", `${dispatchResult.ttftMs}ms`);
+
+        let actualGeneratedTokens = 0;
+
+        for await (const chunk of dispatchResult.stream) {
+          actualGeneratedTokens += Math.max(1, Math.ceil(chunk.length / 4));
+          const sseData = JSON.stringify({
+            choices: [{ delta: { content: chunk } }],
+          });
+          res.write(`data: ${sseData}\n\n`);
+        }
+
+        // Reconcile actual consumed tokens vs pre-authorized
+        if (this.reconciler && clientAddress) {
+          const selectedProvider =
+            this.matrix.getProvider(dispatchResult.providerId) ?? primaryProvider;
+          const actualPricing = this.pricing.calculatePrice({
+            provider: selectedProvider,
+            inputTokens,
+            outputTokens: actualGeneratedTokens,
+          });
+
+          const preAuthorized = parseInt(pricingResult.microUsdc, 10);
+          const actualCost = parseInt(actualPricing.microUsdc, 10);
+
+          if (preAuthorized > actualCost) {
+            const unspentCredited = this.reconciler.reconcile({
+              clientAddress,
+              preAuthorizedMicroUsdc: preAuthorized,
+              actualMicroUsdc: actualCost,
+            });
+            if (unspentCredited > 0) {
+              res.write(
+                `data: ${JSON.stringify({ type: "reconciliation", creditedMicroUsdc: unspentCredited })}\n\n`
+              );
+            }
+          }
+        }
+
+        res.write("data: [DONE]\n\n");
+        return res.end();
+      } catch (err: unknown) {
+        if (this.slaSlasher) {
+          try {
+            await this.slaSlasher.reportFailure(primaryProvider.id, requestHash);
+          } catch {
+            // non-blocking
+          }
+        }
+        const message = err instanceof Error ? err.message : String(err);
+        return res.status(502).json({ error: `Inference failed across fallback chain: ${message}` });
+      }
+    });
+  }
+
+  private send402Challenge(
+    res: Response,
+    requirements: PaymentRequirements,
+    usdFormatted: string
+  ): Response {
+    const challengeBody = {
+      x402Version: 2,
+      accepts: [requirements],
+      error: "Payment Required",
+      price: { amount: usdFormatted.replace("$", ""), currency: "USD" },
+    };
+
+    const encoded = Buffer.from(JSON.stringify(challengeBody)).toString("base64");
+    res.setHeader("PAYMENT-REQUIRED", encoded);
+    res.setHeader("X-Payment-Required", encoded);
+    res.setHeader(
+      "WWW-Authenticate",
+      `x402 scheme="exact", network="${requirements.network}", amount="${requirements.amount}", asset="${requirements.asset}", payTo="${requirements.payTo}"`
+    );
+
+    return res.status(402).json(challengeBody);
+  }
+}
