@@ -8,6 +8,8 @@ import {
   PaymentErrorCode,
   PaymentRequirements,
 } from "../domain/types.js";
+import { ISettlementStorage, SettlementFilter, SettlementRecord } from "../storage/types.js";
+import { MemorySettlementStorage } from "../storage/memory_storage.js";
 import { IVerifierService } from "../services/verifier.js";
 import { ISettlerService } from "../services/settler.js";
 import { ISettlementQueue } from "../services/settlement_queue.js";
@@ -58,6 +60,7 @@ export interface BlockRunGatewayOptions {
   fleetService?: FleetService;
   merchantPool?: MerchantPoolManager;
   treasurySweeper?: TreasurySweeperService;
+  storage?: ISettlementStorage;
   geminiApiKey?: string;
   payTo: string;
   network?: string;
@@ -291,6 +294,7 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
     timeoutMs: options.upstreamTimeoutMs ?? 30000,
   });
 
+  const storage = options.storage ?? new MemorySettlementStorage();
   const merchantPool = options.merchantPool || new MerchantPoolManager();
   const treasurySweeper =
     options.treasurySweeper ||
@@ -642,6 +646,168 @@ export function createBlockRunGateway(options: BlockRunGatewayOptions): Express 
       res.json(result);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : "Failed to trigger treasury sweep";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  function parseDateQuery(val: unknown): number | undefined {
+    if (!val || typeof val !== "string") return undefined;
+    const trimmed = val.trim();
+    const num = Number(trimmed);
+    if (!isNaN(num) && num > 0) {
+      if (trimmed.length === 10) return num * 1000;
+      return num;
+    }
+    const parsed = Date.parse(trimmed);
+    return isNaN(parsed) ? undefined : parsed;
+  }
+
+  function escapeCsv(val: any): string {
+    if (val === null || val === undefined) return "";
+    const str = String(val);
+    if (str.includes(",") || str.includes('"') || str.includes("\n") || str.includes("\r")) {
+      return `"${str.replace(/"/g, '""')}"`;
+    }
+    return str;
+  }
+
+  /**
+   * GET /api/v1/settlements
+   * Merchant settlement history and invoicing API with merchant address filtering,
+   * pagination, date ranges, and aggregated revenue totals.
+   */
+  app.get("/api/v1/settlements", async (req: Request, res: Response) => {
+    try {
+      const merchant = (req.query.merchant || req.query.receiver) as string | undefined;
+      const payer = req.query.payer as string | undefined;
+      const status = req.query.status as SettlementRecord["status"] | undefined;
+      const asset = req.query.asset as string | undefined;
+      const fromDate = parseDateQuery(req.query.from || req.query.fromDate || req.query.startDate);
+      const toDate = parseDateQuery(req.query.to || req.query.toDate || req.query.endDate);
+
+      const limit = Math.max(1, Math.min(500, parseInt((req.query.limit as string) || "50", 10)));
+      const offset = Math.max(0, parseInt((req.query.offset as string) || "0", 10));
+
+      const filter: SettlementFilter = {
+        receiver: merchant,
+        payer,
+        status,
+        asset,
+        fromDate,
+        toDate,
+        limit,
+        offset,
+      };
+
+      const [records, total, summary] = await Promise.all([
+        storage.list(filter),
+        (storage as any).count
+          ? (storage as any).count(filter)
+          : (await storage.list({ ...filter, limit: undefined, offset: undefined })).length,
+        (storage as any).getSummary
+          ? (storage as any).getSummary(filter)
+          : {
+              totalCount: 0,
+              completedCount: 0,
+              failedCount: 0,
+              pendingCount: 0,
+              totalCompletedRevenueMicroUsdc: "0",
+              totalCompletedRevenueUsd: "$0.0000",
+              revenueByAsset: {},
+            },
+      ]);
+
+      const formatted = records.map((r) => ({
+        ...r,
+        date: new Date(r.createdAt).toISOString(),
+      }));
+
+      res.json({
+        settlements: formatted,
+        pagination: {
+          total,
+          limit,
+          offset,
+          hasMore: offset + records.length < total,
+        },
+        summary,
+      });
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to retrieve settlements";
+      res.status(500).json({ error: message });
+    }
+  });
+
+  /**
+   * GET /api/v1/settlements/export.csv
+   * Downloads merchant settlement history as an RFC-4180 compliant CSV file.
+   */
+  app.get("/api/v1/settlements/export.csv", async (req: Request, res: Response) => {
+    try {
+      const merchant = (req.query.merchant || req.query.receiver) as string | undefined;
+      const payer = req.query.payer as string | undefined;
+      const status = req.query.status as SettlementRecord["status"] | undefined;
+      const asset = req.query.asset as string | undefined;
+      const fromDate = parseDateQuery(req.query.from || req.query.fromDate || req.query.startDate);
+      const toDate = parseDateQuery(req.query.to || req.query.toDate || req.query.endDate);
+
+      const filter: SettlementFilter = {
+        receiver: merchant,
+        payer,
+        status,
+        asset,
+        fromDate,
+        toDate,
+        limit: 10000,
+        offset: 0,
+      };
+
+      const records = await storage.list(filter);
+
+      res.setHeader("Content-Type", "text/csv; charset=utf-8");
+      res.setHeader(
+        "Content-Disposition",
+        `attachment; filename="settlements-export-${Date.now()}.csv"`
+      );
+
+      const headers = [
+        "id",
+        "signatureHash",
+        "payer",
+        "receiver",
+        "asset",
+        "amount",
+        "status",
+        "txHash",
+        "createdAt",
+        "date",
+        "errorCode",
+        "errorReason",
+      ];
+
+      const csvLines = [
+        headers.join(","),
+        ...records.map((r) =>
+          [
+            escapeCsv(r.id),
+            escapeCsv(r.signatureHash),
+            escapeCsv(r.payer),
+            escapeCsv(r.receiver),
+            escapeCsv(r.asset),
+            escapeCsv(r.amount),
+            escapeCsv(r.status),
+            escapeCsv(r.txHash ?? ""),
+            escapeCsv(r.createdAt),
+            escapeCsv(new Date(r.createdAt).toISOString()),
+            escapeCsv(r.errorCode ?? ""),
+            escapeCsv(r.errorReason ?? ""),
+          ].join(",")
+        ),
+      ];
+
+      res.send(csvLines.join("\r\n"));
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to export settlements CSV";
       res.status(500).json({ error: message });
     }
   });

@@ -10,6 +10,7 @@ export * from "./services/verifier.js";
 export * from "./services/settler.js";
 export * from "./services/settlement_queue.js";
 export * from "./services/treasury_service.js";
+export * from "./services/relayer_gas_sentinel.js";
 export * from "./services/gas_calculator.js";
 export * from "./utils/data_parser.js";
 export * from "./utils/header_utils.js";
@@ -32,6 +33,7 @@ export * from "./services/mcp_proof_logger.js";
 export * from "./services/mcp_escrow_adapter.js";
 export * from "./services/reputation_client.js";
 export * from "./gateway/mcp_gateway.js";
+export * from "./gateway/tool_circuit_breaker.js";
 export * from "./server/mcp_server.js";
 
 // Product 2: x402-tollbooth

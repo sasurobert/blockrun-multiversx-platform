@@ -20,6 +20,10 @@ export class McpExecutor {
     this.handlers.set(toolName, handler);
   }
 
+  public hasHandler(toolName: string): boolean {
+    return this.handlers.has(toolName);
+  }
+
   public async executeTool(
     toolName: string,
     args: Record<string, unknown>

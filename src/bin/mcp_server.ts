@@ -70,7 +70,7 @@ async function main() {
   });
 
   const merchantPool = new MerchantPoolManager();
-  const registry = new McpRegistryAdapter();
+  const registry = new McpRegistryAdapter({ dbPathOrDb: sqliteDbPath });
   const executor = new McpExecutor();
 
   // 1. Tool: MultiversX Account Inspector

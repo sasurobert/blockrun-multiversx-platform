@@ -18,6 +18,7 @@ export const McpToolDefinitionSchema = z.object({
   inputSchema: z.record(z.unknown()),
   pricing: McpPricingConfigSchema,
   payTo: z.string().optional(),
+  endpointUrl: z.string().optional(),
   reputationScore: z.number().min(0).max(100).optional(),
   totalCompletedJobs: z.number().int().nonnegative().optional(),
 });
@@ -49,6 +50,7 @@ export const McpToolCallResultSchema = z.object({
   content: z.array(McpContentItemSchema),
   isError: z.boolean().default(false),
   paymentReceipt: z.string().optional(),
+  errorCode: z.string().optional(),
 });
 
 export type McpToolCallResult = z.infer<typeof McpToolCallResultSchema>;

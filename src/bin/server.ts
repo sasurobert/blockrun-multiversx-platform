@@ -20,7 +20,8 @@ import { MerchantPoolManager } from "../services/merchant_pool.js";
 import { TreasurySweeperService } from "../services/treasury_sweeper.js";
 import { TollboothServer } from "../tollbooth/tollbooth_server.js";
 import { PipelinedSettlementQueue } from "../services/pipelined_settlement_queue.js";
-import { Mnemonic } from "@multiversx/sdk-wallet";
+import { RelayerGasSentinel } from "../services/relayer_gas_sentinel.js";
+import { Mnemonic, UserSigner } from "@multiversx/sdk-wallet";
 
 /**
  * Starts the BlockRun MultiversX Gateway and x402 Facilitator services.
@@ -126,6 +127,29 @@ export async function startServers() {
     apiUrl,
   });
 
+  // Initialize Relayer Gas Sentinel & Auto-Top-Up
+  let treasurySigner: UserSigner | null = null;
+  const treasuryPemPath = process.env.TREASURY_PEM_PATH || path.join(process.cwd(), "wallets", "merchant.pem");
+  if (process.env.TREASURY_PEM) {
+    treasurySigner = UserSigner.fromPem(process.env.TREASURY_PEM);
+  } else if (fs.existsSync(treasuryPemPath)) {
+    treasurySigner = UserSigner.fromPem(fs.readFileSync(treasuryPemPath, "utf-8"));
+  }
+
+  let gasSentinel: RelayerGasSentinel | null = null;
+  if (treasurySigner) {
+    const chainID = network.includes(":D") ? "D" : network.includes(":T") ? "T" : "1";
+    gasSentinel = new RelayerGasSentinel({
+      networkProvider,
+      relayerPool,
+      treasurySigner,
+      chainID,
+      checkIntervalMs: 60_000,
+    });
+    gasSentinel.start();
+    console.log("RelayerGasSentinel active: monitoring on-chain EGLD balances with auto-top-up.");
+  }
+
   // 6. Create Express Apps
   const facilitatorApp = createFacilitatorServer({
     verifier,
@@ -141,6 +165,7 @@ export async function startServers() {
     relayerPool,
     merchantPool,
     treasurySweeper,
+    storage,
     payTo: merchantPayTo,
     network,
     asset: usdcToken,

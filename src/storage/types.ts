@@ -24,14 +24,25 @@ export interface SettlementRecord {
   validBefore?: number;
 }
 
-/**
- * Query filter options for querying settlement records.
- */
 export interface SettlementFilter {
   payer?: string;
+  receiver?: string;
   status?: SettlementStatus;
+  asset?: string;
+  fromDate?: number;
+  toDate?: number;
   limit?: number;
   offset?: number;
+}
+
+export interface SettlementSummary {
+  totalCount: number;
+  completedCount: number;
+  failedCount: number;
+  pendingCount: number;
+  totalCompletedRevenueMicroUsdc: string;
+  totalCompletedRevenueUsd: string;
+  revenueByAsset: Record<string, string>;
 }
 
 /**

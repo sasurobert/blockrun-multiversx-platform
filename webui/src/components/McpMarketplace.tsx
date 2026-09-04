@@ -13,6 +13,10 @@ import {
   DollarSign,
   Layers,
   ArrowRight,
+  Plus,
+  X,
+  Globe,
+  Code,
 } from "lucide-react";
 import { API_BASE } from "../config";
 import { useWallet } from "../context/WalletContext";
@@ -159,8 +163,105 @@ export const McpMarketplace: React.FC = () => {
   const [explorerUrl, setExplorerUrl] = useState<string>("");
   const [copied, setCopied] = useState(false);
 
+  // Register Tool Modal State
+  const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
+  const [regName, setRegName] = useState("");
+  const [regDescription, setRegDescription] = useState("");
+  const [regInputSchema, setRegInputSchema] = useState(
+    JSON.stringify(
+      {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query or task input" },
+        },
+        required: ["query"],
+      },
+      null,
+      2
+    )
+  );
+  const [regPriceMicroUsdc, setRegPriceMicroUsdc] = useState("10000");
+  const [regPayTo, setRegPayTo] = useState("");
+  const [regEndpointUrl, setRegEndpointUrl] = useState("https://api.mytool.com/mcp");
+  const [regSubmitting, setRegSubmitting] = useState(false);
+  const [regError, setRegError] = useState<string | null>(null);
+  const [regSuccess, setRegSuccess] = useState<string | null>(null);
+
   const defaultAgent = "erd1n2tunlzeqdezy3nz4cdz0a2r056wlsrdew8atsmst7cpd2l0fjxqsgrc6a";
   const payerAddress = connectedAddress || defaultAgent;
+
+  const handleRegisterTool = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setRegError(null);
+    setRegSuccess(null);
+
+    let parsedSchema: Record<string, unknown> = {};
+    try {
+      parsedSchema = JSON.parse(regInputSchema);
+    } catch {
+      setRegError("Input schema must be valid JSON");
+      return;
+    }
+
+    if (!regName.trim()) {
+      setRegError("Tool name is required");
+      return;
+    }
+
+    const payToTarget = regPayTo.trim() || connectedAddress || defaultAgent;
+    if (!payToTarget.startsWith("erd1") || payToTarget.length !== 62) {
+      setRegError("Valid 62-character MultiversX bech32 address (erd1...) required for payTo");
+      return;
+    }
+
+    setRegSubmitting(true);
+    try {
+      const res = await fetch(`${API_BASE}/mcp/v1/tools/register`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: regName.trim(),
+          description: regDescription.trim(),
+          inputSchema: parsedSchema,
+          pricing: {
+            microUsdc: regPriceMicroUsdc.trim(),
+            token: "USDC-350c4e",
+            serviceId: 1,
+            providerAgentNonce: 1,
+          },
+          payTo: payToTarget,
+          endpointUrl: regEndpointUrl.trim() || undefined,
+        }),
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        throw new Error(data.error || `Registration returned HTTP ${res.status}`);
+      }
+
+      const registered = data.tool;
+      const newToolItem: ToolItem = {
+        name: registered.name,
+        description: registered.description,
+        inputSchema: registered.inputSchema,
+        pricing: registered.pricing,
+      };
+
+      setTools((prev) => [newToolItem, ...prev.filter((t) => t.name !== newToolItem.name)]);
+      setSelectedTool(newToolItem);
+      setInputValues({});
+      setRegSuccess(`Tool '${newToolItem.name}' registered successfully!`);
+      setTimeout(() => {
+        setIsRegisterModalOpen(false);
+        setRegSuccess(null);
+      }, 1200);
+    } catch (err: unknown) {
+      const msg = err instanceof Error ? err.message : String(err);
+      setRegError(msg);
+    } finally {
+      setRegSubmitting(false);
+    }
+  };
 
   useEffect(() => {
     fetch(`${API_BASE}/mcp/v1/tools`)
@@ -358,6 +459,13 @@ export const McpMarketplace: React.FC = () => {
         </div>
 
         <div className="flex items-center gap-3">
+          <button
+            onClick={() => setIsRegisterModalOpen(true)}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-semibold transition-all cursor-pointer shadow-sm shadow-emerald-900/20"
+          >
+            <Plus className="h-3.5 w-3.5" />
+            <span>Register Tool</span>
+          </button>
           <div className="text-right">
             <div className="text-xs text-slate-400 font-mono">Payer Account</div>
             <div className="text-xs font-semibold text-emerald-400 font-mono">
@@ -576,6 +684,177 @@ export const McpMarketplace: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Register Tool Modal */}
+      {isRegisterModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/75 backdrop-blur-sm animate-in fade-in duration-200">
+          <div className="relative w-full max-w-2xl bg-[#0f172a] border border-slate-700/80 rounded-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh]">
+            {/* Modal Header */}
+            <div className="p-5 border-b border-slate-800 flex items-center justify-between bg-slate-900/50">
+              <div className="flex items-center gap-3">
+                <div className="p-2 rounded-xl bg-cyan-500/20 text-cyan-400 border border-cyan-500/30">
+                  <Wrench className="h-5 w-5" />
+                </div>
+                <div>
+                  <h3 className="text-lg font-bold text-white">Register New MCP Tool</h3>
+                  <p className="text-xs text-slate-400">
+                    Publish an autonomous tool monetized via MultiversX micro-USDC x402 payments
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsRegisterModalOpen(false)}
+                className="p-2 rounded-lg text-slate-400 hover:text-white hover:bg-slate-800/60 transition-colors cursor-pointer"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            {/* Modal Body */}
+            <form onSubmit={handleRegisterTool} className="p-6 overflow-y-auto space-y-4 flex-1">
+              {regError && (
+                <div className="p-3 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs flex items-center gap-2">
+                  <AlertCircle className="h-4 w-4 shrink-0 text-rose-400" />
+                  <span>{regError}</span>
+                </div>
+              )}
+
+              {regSuccess && (
+                <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
+                  <CheckCircle2 className="h-4 w-4 shrink-0 text-emerald-400" />
+                  <span>{regSuccess}</span>
+                </div>
+              )}
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Tool Identifier <span className="text-cyan-400">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={regName}
+                    onChange={(e) => setRegName(e.target.value)}
+                    placeholder="e.g. multiversx_get_hyperblock"
+                    required
+                    className="w-full px-3.5 py-2 rounded-xl bg-[#0a0e17] border border-slate-700/80 text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+
+                <div>
+                  <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                    Price per Invocation (micro-USDC) <span className="text-cyan-400">*</span>
+                  </label>
+                  <div className="relative">
+                    <input
+                      type="number"
+                      value={regPriceMicroUsdc}
+                      onChange={(e) => setRegPriceMicroUsdc(e.target.value)}
+                      placeholder="10000"
+                      min="1"
+                      required
+                      className="w-full px-3.5 py-2 rounded-xl bg-[#0a0e17] border border-slate-700/80 text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-cyan-500 pr-16"
+                    />
+                    <span className="absolute right-3 top-2 text-xs font-mono text-emerald-400 font-semibold">
+                      ${(Number(regPriceMicroUsdc || 0) / 1e6).toFixed(4)}
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Description <span className="text-cyan-400">*</span>
+                </label>
+                <input
+                  type="text"
+                  value={regDescription}
+                  onChange={(e) => setRegDescription(e.target.value)}
+                  placeholder="Describe what the agent or developer achieves with this tool"
+                  required
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#0a0e17] border border-slate-700/80 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Upstream HTTP Endpoint URL
+                </label>
+                <div className="relative">
+                  <Globe className="absolute left-3 top-2.5 h-4 w-4 text-slate-500" />
+                  <input
+                    type="url"
+                    value={regEndpointUrl}
+                    onChange={(e) => setRegEndpointUrl(e.target.value)}
+                    placeholder="https://api.mytool.com/mcp"
+                    className="w-full pl-9 pr-3.5 py-2 rounded-xl bg-[#0a0e17] border border-slate-700/80 text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-cyan-500"
+                  />
+                </div>
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Requests will be proxied with circuit-breaker protection (15s timeout, 5-strike trip).
+                </p>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                  Settlement PayTo Address (MultiversX Bech32)
+                </label>
+                <input
+                  type="text"
+                  value={regPayTo}
+                  onChange={(e) => setRegPayTo(e.target.value)}
+                  placeholder={payerAddress}
+                  className="w-full px-3.5 py-2 rounded-xl bg-[#0a0e17] border border-slate-700/80 text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-cyan-500"
+                />
+                <p className="text-[11px] text-slate-400 mt-1">
+                  Leave blank to receive settlements at your current payer address.
+                </p>
+              </div>
+
+              <div>
+                <div className="flex items-center justify-between mb-1.5">
+                  <label className="text-xs font-semibold text-slate-300 flex items-center gap-1.5">
+                    <Code className="h-3.5 w-3.5 text-cyan-400" />
+                    Input Schema (JSON Schema format)
+                  </label>
+                  <span className="text-[11px] text-slate-500 font-mono">RFC-7159 JSON</span>
+                </div>
+                <textarea
+                  value={regInputSchema}
+                  onChange={(e) => setRegInputSchema(e.target.value)}
+                  rows={6}
+                  className="w-full p-3 rounded-xl bg-[#080c14] border border-slate-700/80 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500"
+                />
+              </div>
+
+              {/* Modal Footer */}
+              <div className="pt-3 border-t border-slate-800 flex items-center justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setIsRegisterModalOpen(false)}
+                  className="px-4 py-2 rounded-xl border border-slate-700 hover:bg-slate-800 text-slate-300 text-xs font-semibold transition-colors cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  disabled={regSubmitting}
+                  className="px-5 py-2 rounded-xl bg-gradient-to-r from-cyan-500 to-blue-600 hover:from-cyan-400 hover:to-blue-500 text-black font-bold text-xs shadow-lg shadow-cyan-500/20 transition-all cursor-pointer disabled:opacity-50 flex items-center gap-2"
+                >
+                  {regSubmitting ? (
+                    <span>Registering...</span>
+                  ) : (
+                    <>
+                      <Plus className="h-3.5 w-3.5" />
+                      <span>Register Tool</span>
+                    </>
+                  )}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

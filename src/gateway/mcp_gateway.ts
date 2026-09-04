@@ -19,6 +19,13 @@ import {
   ToolHealthStatus,
 } from "../domain/mcp_types.js";
 import { PaymentRequirements, X402PaymentPayload } from "../domain/types.js";
+import {
+  ToolCircuitBreaker,
+  ToolCircuitOpenError,
+  ToolUpstreamTimeoutError,
+} from "./tool_circuit_breaker.js";
+
+export { ToolCircuitBreaker, ToolCircuitOpenError, ToolUpstreamTimeoutError };
 
 export interface McpGatewayOptions {
   registry: McpRegistryAdapter;
@@ -29,6 +36,7 @@ export interface McpGatewayOptions {
   proofLogger?: McpProofLogger;
   settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
   network?: string;
+  circuitBreaker?: ToolCircuitBreaker;
 }
 
 export class McpGateway {
@@ -41,6 +49,7 @@ export class McpGateway {
   public proofLogger?: McpProofLogger;
   public settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
   public network: string;
+  public circuitBreaker: ToolCircuitBreaker;
 
   constructor(options: McpGatewayOptions) {
     this.registry = options.registry;
@@ -51,10 +60,12 @@ export class McpGateway {
     this.proofLogger = options.proofLogger;
     this.settlementQueue = options.settlementQueue;
     this.network = options.network ?? "multiversx:1";
+    this.circuitBreaker = options.circuitBreaker ?? new ToolCircuitBreaker();
 
     this.app = express();
     this.app.use(cors());
     this.app.use(express.json());
+    this.initExternalToolHandlers();
     this.registerRoutes();
   }
 
@@ -150,6 +161,7 @@ export class McpGateway {
           providerAgentNonce,
         },
         payTo: body.payTo,
+        endpointUrl: body.endpointUrl,
         reputationScore: 100,
         totalCompletedJobs: 0,
       };
@@ -157,37 +169,12 @@ export class McpGateway {
       // Register into registry adapter
       this.registry.registerLocalTool(toolDef);
 
-      // If upstream endpointUrl provided, wire HTTP forwarding handler
+      // If upstream endpointUrl provided, wire HTTP forwarding handler with circuit breaker & timeout guard
       if (body.endpointUrl) {
-        this.executor.registerHandler(body.name, async (args) => {
-          try {
-            const resp = await fetch(body.endpointUrl!, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ name: body.name, arguments: args }),
-            });
-            if (!resp.ok) {
-              const errText = await resp.text();
-              return {
-                content: [{ type: "text", text: `Upstream tool error (${resp.status}): ${errText}` }],
-                isError: true,
-              };
-            }
-            const data = (await resp.json()) as any;
-            return {
-              content: Array.isArray(data?.content)
-                ? data.content
-                : [{ type: "text", text: typeof data === "object" ? JSON.stringify(data) : String(data) }],
-              isError: Boolean(data?.isError),
-            };
-          } catch (err: unknown) {
-            const msg = err instanceof Error ? err.message : String(err);
-            return {
-              content: [{ type: "text", text: `Upstream connection failed: ${msg}` }],
-              isError: true,
-            };
-          }
-        });
+        this.executor.registerHandler(
+          body.name,
+          this.createExternalToolHandler(body.name, body.endpointUrl)
+        );
       }
 
       this.registry.recordToolHeartbeat(body.name, 10, "healthy");
@@ -613,5 +600,77 @@ export class McpGateway {
     );
 
     return res.status(402).json(challengeBody);
+  }
+
+  private initExternalToolHandlers(): void {
+    for (const tool of this.registry.listLocalTools()) {
+      if (tool.endpointUrl && !this.executor.hasHandler(tool.name)) {
+        this.executor.registerHandler(
+          tool.name,
+          this.createExternalToolHandler(tool.name, tool.endpointUrl)
+        );
+      }
+    }
+  }
+
+  public createExternalToolHandler(toolName: string, endpointUrl: string) {
+    return async (args: Record<string, unknown>) => {
+      const startTime = Date.now();
+      try {
+        const result = await this.circuitBreaker.execute(toolName, async (signal) => {
+          const resp = await fetch(endpointUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ name: toolName, arguments: args }),
+            signal,
+          });
+
+          const latencyMs = Date.now() - startTime;
+          if (!resp.ok) {
+            const errText = await resp.text().catch(() => "");
+            throw new Error(`Upstream tool error (${resp.status}): ${errText}`);
+          }
+
+          const data = (await resp.json().catch(() => ({}))) as any;
+          const isError = Boolean(data?.isError);
+          this.registry.recordToolExecution(toolName, !isError, latencyMs);
+          return {
+            content: Array.isArray(data?.content)
+              ? data.content
+              : [{ type: "text", text: typeof data === "object" ? JSON.stringify(data) : String(data) }],
+            isError,
+            errorCode: data?.errorCode,
+          };
+        });
+
+        return result;
+      } catch (err: unknown) {
+        const latencyMs = Date.now() - startTime;
+        this.registry.recordToolExecution(toolName, false, latencyMs);
+
+        if (err instanceof ToolCircuitOpenError) {
+          return {
+            content: [{ type: "text", text: err.message }],
+            isError: true,
+            errorCode: "TOOL_CIRCUIT_OPEN",
+          };
+        }
+
+        if (err instanceof ToolUpstreamTimeoutError) {
+          return {
+            content: [{ type: "text", text: err.message }],
+            isError: true,
+            errorCode: "TOOL_UPSTREAM_TIMEOUT",
+          };
+        }
+
+        const msg = err instanceof Error ? err.message : String(err);
+        return {
+          content: [{ type: "text", text: `Upstream connection failed: ${msg}` }],
+          isError: true,
+          errorCode: "TOOL_UPSTREAM_ERROR",
+        };
+      }
+    };
   }
 }

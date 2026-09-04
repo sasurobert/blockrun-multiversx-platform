@@ -13,6 +13,12 @@ import {
   ExternalLink,
   ShieldCheck,
   TrendingUp,
+  Copy,
+  Code,
+  Terminal,
+  Layers,
+  Globe,
+  Server,
 } from "lucide-react";
 import { API_BASE } from "../config";
 import { useWallet } from "../context/WalletContext";
@@ -67,6 +73,121 @@ export const TollboothDashboard: React.FC = () => {
 
   const defaultAgent = "erd1n2tunlzeqdezy3nz4cdz0a2r056wlsrdew8atsmst7cpd2l0fjxqsgrc6a";
   const payerAddress = connectedAddress || defaultAgent;
+
+  // Publisher Integration & Embed State
+  const [activeTab, setActiveTab] = useState<"simulator" | "embed">("simulator");
+  const [embedFramework, setEmbedFramework] = useState<"cloudflare" | "nextjs" | "express">("cloudflare");
+  const [embedMerchantAddress, setEmbedMerchantAddress] = useState<string>(
+    connectedAddress || "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k"
+  );
+  const [embedRateMicroUsdc, setEmbedRateMicroUsdc] = useState<string>("1500");
+  const [embedNetwork, setEmbedNetwork] = useState<string>("multiversx:D");
+  const [embedTokenId, setEmbedTokenId] = useState<string>("USDC-350c4e");
+  const [copiedCode, setCopiedCode] = useState(false);
+  const [copiedInstall, setCopiedInstall] = useState(false);
+
+  useEffect(() => {
+    if (connectedAddress) {
+      setEmbedMerchantAddress(connectedAddress);
+    }
+  }, [connectedAddress]);
+
+  const handleCopyCode = (code: string) => {
+    navigator.clipboard.writeText(code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
+
+  const handleCopyInstall = () => {
+    navigator.clipboard.writeText("npm install @sasurobert/tollbooth-edge");
+    setCopiedInstall(true);
+    setTimeout(() => setCopiedInstall(false), 2000);
+  };
+
+  const getGeneratedCode = () => {
+    const merchant = embedMerchantAddress.trim() || "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k";
+    const rate = embedRateMicroUsdc.trim() || "1500";
+    const net = embedNetwork.trim() || "multiversx:D";
+    const tok = embedTokenId.trim() || "USDC-350c4e";
+
+    if (embedFramework === "cloudflare") {
+      return `import { createTollboothEdgeHandler } from "@sasurobert/tollbooth-edge";
+
+// Initialize the edge handler with MultiversX x402 parameters
+const tollbooth = createTollboothEdgeHandler({
+  merchantAddress: "${merchant}",
+  rateMicroUsdc: "${rate}", // $${(Number(rate) / 1e6).toFixed(4)} per scraped page
+  network: "${net}",
+  tokenId: "${tok}",
+  allowHumanTraffic: true, // Humans pass through unhindered
+});
+
+export default {
+  async fetch(request: Request, env: any, ctx: any): Promise<Response> {
+    // Intercept AI scrapers (GPTBot, ClaudeBot, Perplexity) <5ms at CDN edge
+    const tollResponse = await tollbooth(request, env, ctx);
+    return tollResponse;
+  },
+};`;
+    }
+
+    if (embedFramework === "nextjs") {
+      return `import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
+import { createTollboothEdgeHandler } from "@sasurobert/tollbooth-edge";
+
+const tollbooth = createTollboothEdgeHandler({
+  merchantAddress: "${merchant}",
+  rateMicroUsdc: "${rate}",
+  network: "${net}",
+  tokenId: "${tok}",
+  allowHumanTraffic: true,
+});
+
+export async function middleware(request: NextRequest) {
+  // Edge runtime inspects bot user-agent and issues 402 or forwards to origin
+  const res = await tollbooth(request as unknown as Request);
+  if (res.status === 402) {
+    return res;
+  }
+  return NextResponse.next();
+}
+
+export const config = {
+  // Protect all public documentation, articles, and API endpoints
+  matcher: ["/docs/:path*", "/blog/:path*", "/api/public/:path*"],
+};`;
+    }
+
+    return `import express from "express";
+import { tollboothMiddleware } from "@sasurobert/tollbooth-edge";
+
+const app = express();
+
+// Protect content routes with MultiversX x402 Anti-Bot Tollbooth
+app.use(
+  tollboothMiddleware({
+    merchantAddress: "${merchant}",
+    rateMicroUsdc: "${rate}",
+    network: "${net}",
+    tokenId: "${tok}",
+    allowHumanTraffic: true,
+  })
+);
+
+app.get("/docs/:slug", (req, res) => {
+  // Paid AI agent receives origin response with verified payment receipt
+  res.json({
+    title: "Documentation",
+    content: "Clean markdown content delivered to authorized AI crawler.",
+    settledTo: "${merchant}",
+  });
+});
+
+app.listen(3000, () => {
+  console.log("Publisher server running on port 3000 with @sasurobert/tollbooth-edge");
+});`;
+  };
 
   useEffect(() => {
     fetch(`${API_BASE}/tollbooth/stats`)
@@ -292,168 +413,423 @@ export const TollboothDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Main Grid: Bot Classification Matrix + Interactive Sandbox */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Left Col: Bot Classification Breakdown */}
-        <div className="lg:col-span-5 space-y-4">
-          <div className="p-5 rounded-2xl bg-[#0f1523] border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
-              <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                <Bot className="h-4 w-4 text-purple-400" />
-                Bot Classification Matrix
-              </h3>
-              <span className="text-[11px] font-mono text-slate-400">Real-time Header Inspection</span>
-            </div>
+      {/* Tab Switcher */}
+      <div className="flex items-center gap-2 border-b border-slate-800 pb-3">
+        <button
+          onClick={() => setActiveTab("simulator")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold font-mono transition-all cursor-pointer ${
+            activeTab === "simulator"
+              ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+              : "bg-[#0f1523] text-slate-400 hover:text-white border border-slate-800"
+          }`}
+        >
+          <Sparkles className="h-4 w-4" />
+          <span>Interactive Simulator</span>
+        </button>
+        <button
+          onClick={() => setActiveTab("embed")}
+          className={`flex items-center gap-2 px-4 py-2 rounded-xl text-xs font-semibold font-mono transition-all cursor-pointer ${
+            activeTab === "embed"
+              ? "bg-purple-600 text-white shadow-lg shadow-purple-600/30"
+              : "bg-[#0f1523] text-slate-400 hover:text-white border border-slate-800"
+          }`}
+        >
+          <Code className="h-4 w-4" />
+          <span>Embed Tollbooth (Publisher Portal)</span>
+        </button>
+      </div>
 
-            <div className="space-y-3">
-              {stats.topBots.map((bot) => (
-                <div key={bot.name} className="p-3 rounded-xl bg-[#080c14] border border-slate-800/80 space-y-2">
-                  <div className="flex items-center justify-between text-xs font-mono">
-                    <span className="text-white font-semibold">{bot.name}</span>
-                    <span className="text-emerald-400 font-bold">{bot.convertedPct}% Paid</span>
+      {/* Simulator View */}
+      {activeTab === "simulator" && (
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+          {/* Left Col: Bot Classification Breakdown */}
+          <div className="lg:col-span-5 space-y-4">
+            <div className="p-5 rounded-2xl bg-[#0f1523] border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                  <Bot className="h-4 w-4 text-purple-400" />
+                  Bot Classification Matrix
+                </h3>
+                <span className="text-[11px] font-mono text-slate-400">Real-time Header Inspection</span>
+              </div>
+
+              <div className="space-y-3">
+                {stats.topBots.map((bot) => (
+                  <div key={bot.name} className="p-3 rounded-xl bg-[#080c14] border border-slate-800/80 space-y-2">
+                    <div className="flex items-center justify-between text-xs font-mono">
+                      <span className="text-white font-semibold">{bot.name}</span>
+                      <span className="text-emerald-400 font-bold">{bot.convertedPct}% Paid</span>
+                    </div>
+                    <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
+                      <div
+                        className="bg-gradient-to-r from-purple-500 to-emerald-400 h-1.5 rounded-full"
+                        style={{ width: `${bot.convertedPct}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
+                      <span>{bot.count.toLocaleString()} requests</span>
+                      <span>Status: Active Toll</span>
+                    </div>
                   </div>
-                  <div className="w-full bg-slate-800/80 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className="bg-gradient-to-r from-purple-500 to-emerald-400 h-1.5 rounded-full"
-                      style={{ width: `${bot.convertedPct}%` }}
-                    />
-                  </div>
-                  <div className="flex items-center justify-between text-[10px] text-slate-500 font-mono">
-                    <span>{bot.count.toLocaleString()} requests</span>
-                    <span>Status: Active Toll</span>
+                ))}
+              </div>
+            </div>
+          </div>
+
+          {/* Right Col: Interactive Scraper & Toll Simulator */}
+          <div className="lg:col-span-7 space-y-4">
+            <div className="p-5 rounded-2xl bg-[#0f1523] border border-slate-800 space-y-4">
+              <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                <div>
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Sparkles className="h-4 w-4 text-cyan-400" />
+                    Live Scraper & 402 Toll Challenge Demo
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-0.5">
+                    Test how the Tollbooth intercepts AI web scrapers and serves 402 micropayment challenges.
+                  </p>
+                </div>
+              </div>
+
+              {/* Config Controls */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300 font-mono">Scraper User-Agent</label>
+                  <select
+                    value={selectedBot}
+                    onChange={(e) => setSelectedBot(e.target.value)}
+                    className="w-full px-3 py-2 rounded-xl bg-[#080c14] border border-slate-700 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
+                  >
+                    <option value="GPTBot/1.2 (+https://openai.com/gptbot)">GPTBot / 1.2 (OpenAI)</option>
+                    <option value="ClaudeBot/1.0 (+https://anthropic.com/claudebot)">ClaudeBot / 1.0 (Anthropic)</option>
+                    <option value="Bytespider; spider-feedback@bytedance.com">Bytespider (ByteDance)</option>
+                    <option value="PerplexityBot/1.0">PerplexityBot / 1.0</option>
+                    <option value="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)">Human Browser (Chrome)</option>
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-semibold text-slate-300 font-mono">Target Page</label>
+                  <div className="flex gap-2">
+                    {Object.keys(SAMPLE_PAGES).map((p) => (
+                      <button
+                        key={p}
+                        onClick={() => handlePageSelect(p)}
+                        className={`px-3 py-2 rounded-xl text-xs font-mono font-medium transition-all ${
+                          selectedPage === p
+                            ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
+                            : "bg-[#080c14] border border-slate-700 text-slate-400 hover:text-white"
+                        }`}
+                      >
+                        {p}
+                      </button>
+                    ))}
                   </div>
                 </div>
-              ))}
+              </div>
+
+              {/* Action Button */}
+              <button
+                onClick={handleSendScraperRequest}
+                className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                <Bot className="h-4 w-4" />
+                <span>Simulate Crawler Request ({selectedBot.split("/")[0].split(";")[0]})</span>
+              </button>
+
+              {/* 402 Challenge Card */}
+              {testStage === "intercepted_402" && challengeDetails && (
+                <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/50 space-y-3 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2 text-amber-400 font-mono font-bold text-xs">
+                      <Lock className="h-4 w-4" />
+                      <span>HTTP 402 Payment Required</span>
+                    </div>
+                    <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
+                      Challenge Active
+                    </span>
+                  </div>
+
+                  <div className="p-3 rounded-lg bg-black/60 font-mono text-[11px] text-amber-200 space-y-1 overflow-x-auto">
+                    <div><strong>WWW-Authenticate:</strong> {challengeDetails.headers["WWW-Authenticate"]}</div>
+                    <div><strong>Required Toll:</strong> {challengeDetails.requirements.costUsd} ({challengeDetails.requirements.costMicroUsdc} micro-USDC)</div>
+                    <div><strong>Settlement Type:</strong> {challengeDetails.requirements.executionType} (Zero User Gas)</div>
+                  </div>
+
+                  <button
+                    onClick={handlePayAndExtract}
+                    className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-black font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
+                  >
+                    <Unlock className="h-4 w-4" />
+                    <span>Authorize & Settle Toll via Relayed V3 ({challengeDetails.requirements.costUsd})</span>
+                  </button>
+                </div>
+              )}
+
+              {testStage === "settling" && (
+                <div className="p-4 rounded-xl bg-blue-950/20 border border-blue-500/40 text-center space-y-2 font-mono text-xs">
+                  <div className="text-cyan-300 font-bold animate-pulse">
+                    Settling 10,000 µUSDC on MultiversX Devnet...
+                  </div>
+                  <div className="text-slate-400 text-[11px]">
+                    Relayed V3 gasless transaction broadcast to Shard 0 (0.6s round)
+                  </div>
+                </div>
+              )}
+
+              {/* Extracted Markdown Result */}
+              {testStage === "markdown_ready" && extractedResult && (
+                <div className="space-y-3 pt-2 border-t border-slate-800">
+                  <div className="flex items-center justify-between text-xs font-mono">
+                    <span className="text-emerald-400 font-bold flex items-center gap-1.5">
+                      <CheckCircle2 className="h-4 w-4" />
+                      Clean AI Markdown Extracted
+                    </span>
+                    <div className="flex items-center gap-2 text-slate-400 text-[11px]">
+                      <span className="text-cyan-300 font-bold">
+                        {extractedResult.tokenSavingsPct}% Token Savings
+                      </span>
+                      <span>•</span>
+                      <span>{extractedResult.estimatedTokens} Tokens</span>
+                    </div>
+                  </div>
+
+                  <pre className="p-4 rounded-xl bg-[#080c14] border border-slate-800 text-xs font-mono text-slate-200 overflow-x-auto max-h-56 leading-relaxed whitespace-pre-wrap">
+                    {extractedResult.markdown}
+                  </pre>
+                </div>
+              )}
             </div>
           </div>
         </div>
+      )}
 
-        {/* Right Col: Interactive Scraper & Toll Simulator */}
-        <div className="lg:col-span-7 space-y-4">
-          <div className="p-5 rounded-2xl bg-[#0f1523] border border-slate-800 space-y-4">
-            <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+      {/* Publisher Integration & Embed View */}
+      {activeTab === "embed" && (
+        <div className="space-y-6">
+          {/* Quickstart Command Bar */}
+          <div className="p-4 rounded-2xl bg-[#0b101c] border border-purple-500/30 flex flex-col md:flex-row items-center justify-between gap-4 shadow-lg shadow-purple-950/20">
+            <div className="flex items-center gap-3">
+              <div className="p-2 rounded-xl bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                <Terminal className="h-5 w-5" />
+              </div>
               <div>
-                <h3 className="text-sm font-bold text-white flex items-center gap-2">
-                  <Sparkles className="h-4 w-4 text-cyan-400" />
-                  Live Scraper & 402 Toll Challenge Demo
-                </h3>
-                <p className="text-xs text-slate-400 mt-0.5">
-                  Test how the Tollbooth intercepts AI web scrapers and serves 402 micropayment challenges.
-                </p>
+                <div className="text-xs font-semibold text-white">Edge Package Installation</div>
+                <div className="text-xs font-mono text-purple-300">npm install @sasurobert/tollbooth-edge</div>
+              </div>
+            </div>
+            <button
+              onClick={handleCopyInstall}
+              className="flex items-center gap-2 px-4 py-2 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-mono text-xs font-semibold transition-all cursor-pointer shadow-md shadow-purple-900/30"
+            >
+              {copiedInstall ? (
+                <>
+                  <CheckCircle2 className="h-4 w-4 text-emerald-300" />
+                  <span>Copied to Clipboard!</span>
+                </>
+              ) : (
+                <>
+                  <Copy className="h-4 w-4" />
+                  <span>Copy Install Command</span>
+                </>
+              )}
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+            {/* Left Col: Config Generator Controls */}
+            <div className="lg:col-span-5 space-y-4">
+              <div className="p-5 rounded-2xl bg-[#0f1523] border border-slate-800 space-y-4">
+                <div className="border-b border-slate-800/80 pb-3">
+                  <h3 className="text-sm font-bold text-white flex items-center gap-2">
+                    <Layers className="h-4 w-4 text-purple-400" />
+                    Publisher Settlement Config
+                  </h3>
+                  <p className="text-xs text-slate-400 mt-1">
+                    Configure your receiver wallet and per-page toll rates for AI scraper traffic.
+                  </p>
+                </div>
+
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Merchant Settlement Address (MultiversX Bech32)
+                    </label>
+                    <input
+                      type="text"
+                      value={embedMerchantAddress}
+                      onChange={(e) => setEmbedMerchantAddress(e.target.value)}
+                      placeholder="erd1..."
+                      className="w-full px-3.5 py-2 rounded-xl bg-[#080c14] border border-slate-700 text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-purple-500"
+                    />
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      100% of micro-USDC crawler settlements are paid directly to this address.
+                    </p>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                      Toll Rate per Crawled Page (micro-USDC)
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="number"
+                        value={embedRateMicroUsdc}
+                        onChange={(e) => setEmbedRateMicroUsdc(e.target.value)}
+                        placeholder="1500"
+                        min="1"
+                        className="w-full px-3.5 py-2 rounded-xl bg-[#080c14] border border-slate-700 text-white placeholder-slate-500 text-xs font-mono focus:outline-none focus:border-purple-500 pr-20"
+                      />
+                      <span className="absolute right-3 top-2 text-xs font-mono text-emerald-400 font-semibold">
+                        ${(Number(embedRateMicroUsdc || 0) / 1e6).toFixed(6)}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-400 mt-1">
+                      Default 1,500 µUSDC = $0.0015 per scraped page.
+                    </p>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Target Network
+                      </label>
+                      <select
+                        value={embedNetwork}
+                        onChange={(e) => {
+                          setEmbedNetwork(e.target.value);
+                          if (e.target.value === "multiversx:1") {
+                            setEmbedTokenId("USDC-c76f1f");
+                          } else {
+                            setEmbedTokenId("USDC-350c4e");
+                          }
+                        }}
+                        className="w-full px-3 py-2 rounded-xl bg-[#080c14] border border-slate-700 text-white text-xs font-mono focus:outline-none focus:border-purple-500"
+                      >
+                        <option value="multiversx:D">Devnet (multiversx:D)</option>
+                        <option value="multiversx:1">Mainnet (multiversx:1)</option>
+                      </select>
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-semibold text-slate-300 mb-1.5">
+                        Token Identifier
+                      </label>
+                      <input
+                        type="text"
+                        value={embedTokenId}
+                        onChange={(e) => setEmbedTokenId(e.target.value)}
+                        placeholder="USDC-350c4e"
+                        className="w-full px-3 py-2 rounded-xl bg-[#080c14] border border-slate-700 text-white text-xs font-mono focus:outline-none focus:border-purple-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Architecture Badges */}
+                  <div className="p-3.5 rounded-xl bg-[#080c14] border border-slate-800 space-y-2 text-xs font-mono text-slate-300">
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Interception Latency</span>
+                      <span className="text-emerald-400 font-bold">&lt; 5ms at CDN Edge</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Payment Standard</span>
+                      <span className="text-cyan-400 font-bold">RFC 402 Exact Scheme</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Human Browsers</span>
+                      <span className="text-purple-400 font-bold">100% Unhindered Pass-Through</span>
+                    </div>
+                    <div className="flex items-center justify-between">
+                      <span className="text-slate-400">Settlement Execution</span>
+                      <span className="text-yellow-400 font-bold">0.6s Relayed V3 Intra-Shard</span>
+                    </div>
+                  </div>
+                </div>
               </div>
             </div>
 
-            {/* Config Controls */}
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 font-mono">Scraper User-Agent</label>
-                <select
-                  value={selectedBot}
-                  onChange={(e) => setSelectedBot(e.target.value)}
-                  className="w-full px-3 py-2 rounded-xl bg-[#080c14] border border-slate-700 text-xs font-mono text-white focus:outline-none focus:border-purple-500"
-                >
-                  <option value="GPTBot/1.2 (+https://openai.com/gptbot)">GPTBot / 1.2 (OpenAI)</option>
-                  <option value="ClaudeBot/1.0 (+https://anthropic.com/claudebot)">ClaudeBot / 1.0 (Anthropic)</option>
-                  <option value="Bytespider; spider-feedback@bytedance.com">Bytespider (ByteDance)</option>
-                  <option value="PerplexityBot/1.0">PerplexityBot / 1.0</option>
-                  <option value="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7)">Human Browser (Chrome)</option>
-                </select>
-              </div>
-
-              <div className="space-y-1">
-                <label className="text-xs font-semibold text-slate-300 font-mono">Target Page</label>
-                <div className="flex gap-2">
-                  {Object.keys(SAMPLE_PAGES).map((p) => (
+            {/* Right Col: Drop-in Code Snippets */}
+            <div className="lg:col-span-7 space-y-4">
+              <div className="p-5 rounded-2xl bg-[#0f1523] border border-slate-800 space-y-4">
+                {/* Framework Selector Tabs */}
+                <div className="flex items-center justify-between border-b border-slate-800/80 pb-3">
+                  <div className="flex items-center gap-2">
                     <button
-                      key={p}
-                      onClick={() => handlePageSelect(p)}
-                      className={`px-3 py-2 rounded-xl text-xs font-mono font-medium transition-all ${
-                        selectedPage === p
-                          ? "bg-purple-600 text-white shadow-md shadow-purple-600/30"
-                          : "bg-[#080c14] border border-slate-700 text-slate-400 hover:text-white"
+                      onClick={() => setEmbedFramework("cloudflare")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer ${
+                        embedFramework === "cloudflare"
+                          ? "bg-purple-600 text-white shadow-md shadow-purple-900/30"
+                          : "bg-[#080c14] text-slate-400 hover:text-white border border-slate-800"
                       }`}
                     >
-                      {p}
+                      Cloudflare Workers
                     </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-
-            {/* Action Button */}
-            <button
-              onClick={handleSendScraperRequest}
-              className="w-full py-2.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-white font-bold text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer"
-            >
-              <Bot className="h-4 w-4" />
-              <span>Simulate Crawler Request ({selectedBot.split("/")[0].split(";")[0]})</span>
-            </button>
-
-            {/* 402 Challenge Card */}
-            {testStage === "intercepted_402" && challengeDetails && (
-              <div className="p-4 rounded-xl bg-amber-950/20 border border-amber-500/50 space-y-3 animate-fadeIn">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2 text-amber-400 font-mono font-bold text-xs">
-                    <Lock className="h-4 w-4" />
-                    <span>HTTP 402 Payment Required</span>
+                    <button
+                      onClick={() => setEmbedFramework("nextjs")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer ${
+                        embedFramework === "nextjs"
+                          ? "bg-purple-600 text-white shadow-md shadow-purple-900/30"
+                          : "bg-[#080c14] text-slate-400 hover:text-white border border-slate-800"
+                      }`}
+                    >
+                      Next.js Middleware
+                    </button>
+                    <button
+                      onClick={() => setEmbedFramework("express")}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer ${
+                        embedFramework === "express"
+                          ? "bg-purple-600 text-white shadow-md shadow-purple-900/30"
+                          : "bg-[#080c14] text-slate-400 hover:text-white border border-slate-800"
+                      }`}
+                    >
+                      Node.js / Express
+                    </button>
                   </div>
-                  <span className="text-[11px] font-mono px-2 py-0.5 rounded bg-amber-500/20 text-amber-300">
-                    Challenge Active
-                  </span>
+
+                  <button
+                    onClick={() => handleCopyCode(getGeneratedCode())}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600/20 hover:bg-emerald-600/30 text-emerald-300 border border-emerald-500/40 text-xs font-mono font-semibold transition-all cursor-pointer"
+                  >
+                    {copiedCode ? (
+                      <>
+                        <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
+                        <span>Copied!</span>
+                      </>
+                    ) : (
+                      <>
+                        <Copy className="h-3.5 w-3.5" />
+                        <span>Copy Code</span>
+                      </>
+                    )}
+                  </button>
                 </div>
 
-                <div className="p-3 rounded-lg bg-black/60 font-mono text-[11px] text-amber-200 space-y-1 overflow-x-auto">
-                  <div><strong>WWW-Authenticate:</strong> {challengeDetails.headers["WWW-Authenticate"]}</div>
-                  <div><strong>Required Toll:</strong> {challengeDetails.requirements.costUsd} ({challengeDetails.requirements.costMicroUsdc} micro-USDC)</div>
-                  <div><strong>Settlement Type:</strong> {challengeDetails.requirements.executionType} (Zero User Gas)</div>
-                </div>
-
-                <button
-                  onClick={handlePayAndExtract}
-                  className="w-full py-2.5 rounded-xl bg-gradient-to-r from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-black font-extrabold text-xs flex items-center justify-center gap-2 shadow-lg shadow-emerald-500/20 transition-all cursor-pointer"
-                >
-                  <Unlock className="h-4 w-4" />
-                  <span>Authorize & Settle Toll via Relayed V3 ({challengeDetails.requirements.costUsd})</span>
-                </button>
-              </div>
-            )}
-
-            {testStage === "settling" && (
-              <div className="p-4 rounded-xl bg-blue-950/20 border border-blue-500/40 text-center space-y-2 font-mono text-xs">
-                <div className="text-cyan-300 font-bold animate-pulse">
-                  Settling 10,000 µUSDC on MultiversX Devnet...
-                </div>
-                <div className="text-slate-400 text-[11px]">
-                  Relayed V3 gasless transaction broadcast to Shard 0 (0.6s round)
-                </div>
-              </div>
-            )}
-
-            {/* Extracted Markdown Result */}
-            {testStage === "markdown_ready" && extractedResult && (
-              <div className="space-y-3 pt-2 border-t border-slate-800">
-                <div className="flex items-center justify-between text-xs font-mono">
-                  <span className="text-emerald-400 font-bold flex items-center gap-1.5">
-                    <CheckCircle2 className="h-4 w-4" />
-                    Clean AI Markdown Extracted
-                  </span>
-                  <div className="flex items-center gap-2 text-slate-400 text-[11px]">
-                    <span className="text-cyan-300 font-bold">
-                      {extractedResult.tokenSavingsPct}% Token Savings
+                {/* File Name Header */}
+                <div className="flex items-center justify-between text-xs font-mono text-slate-400 px-1">
+                  <div className="flex items-center gap-2">
+                    {embedFramework === "cloudflare" && <Globe className="h-3.5 w-3.5 text-orange-400" />}
+                    {embedFramework === "nextjs" && <Layers className="h-3.5 w-3.5 text-cyan-400" />}
+                    {embedFramework === "express" && <Server className="h-3.5 w-3.5 text-emerald-400" />}
+                    <span>
+                      {embedFramework === "cloudflare"
+                        ? "src/worker.ts"
+                        : embedFramework === "nextjs"
+                        ? "middleware.ts"
+                        : "src/server.ts"}
                     </span>
-                    <span>•</span>
-                    <span>{extractedResult.estimatedTokens} Tokens</span>
                   </div>
+                  <span className="text-[11px] text-slate-500">TypeScript (ES2022)</span>
                 </div>
 
-                <pre className="p-4 rounded-xl bg-[#080c14] border border-slate-800 text-xs font-mono text-slate-200 overflow-x-auto max-h-56 leading-relaxed whitespace-pre-wrap">
-                  {extractedResult.markdown}
+                {/* Code Display */}
+                <pre className="p-4 rounded-xl bg-[#080c14] border border-slate-800 text-xs font-mono text-cyan-300 overflow-x-auto max-h-96 leading-relaxed">
+                  {getGeneratedCode()}
                 </pre>
               </div>
-            )}
+            </div>
           </div>
         </div>
-      </div>
+      )}
     </div>
   );
 };

@@ -6,6 +6,7 @@ import {
   SettlementFilter,
   SettlementRecord,
   SettlementStatus,
+  SettlementSummary,
   StatusUpdateDetails,
 } from "./types.js";
 
@@ -71,6 +72,8 @@ export class SqliteSettlementStorage implements ISettlementStorage {
       );
 
       CREATE INDEX IF NOT EXISTS idx_settlements_payer ON settlements(payer);
+      CREATE INDEX IF NOT EXISTS idx_settlements_receiver ON settlements(receiver);
+      CREATE INDEX IF NOT EXISTS idx_settlements_asset ON settlements(asset);
       CREATE INDEX IF NOT EXISTS idx_settlements_status ON settlements(status);
       CREATE INDEX IF NOT EXISTS idx_settlements_created_at ON settlements(created_at);
     `);
@@ -186,7 +189,7 @@ export class SqliteSettlementStorage implements ISettlementStorage {
     stmt.run(status, txHash, errorReason, errorCode, now, id);
   }
 
-  async list(filter?: SettlementFilter): Promise<SettlementRecord[]> {
+  private buildWhereClause(filter?: SettlementFilter): { whereClause: string; params: (string | number)[] } {
     const conditions: string[] = [];
     const params: (string | number)[] = [];
 
@@ -194,17 +197,35 @@ export class SqliteSettlementStorage implements ISettlementStorage {
       conditions.push("payer = ?");
       params.push(filter.payer);
     }
+    if (filter?.receiver) {
+      conditions.push("receiver = ?");
+      params.push(filter.receiver);
+    }
     if (filter?.status) {
       conditions.push("status = ?");
       params.push(filter.status);
     }
-
-    let query = "SELECT * FROM settlements";
-    if (conditions.length > 0) {
-      query += ` WHERE ${conditions.join(" AND ")}`;
+    if (filter?.asset) {
+      conditions.push("asset = ?");
+      params.push(filter.asset);
+    }
+    if (filter?.fromDate !== undefined) {
+      conditions.push("created_at >= ?");
+      params.push(filter.fromDate);
+    }
+    if (filter?.toDate !== undefined) {
+      conditions.push("created_at <= ?");
+      params.push(filter.toDate);
     }
 
-    query += " ORDER BY created_at ASC";
+    const whereClause = conditions.length > 0 ? ` WHERE ${conditions.join(" AND ")}` : "";
+    return { whereClause, params };
+  }
+
+  async list(filter?: SettlementFilter): Promise<SettlementRecord[]> {
+    const { whereClause, params } = this.buildWhereClause(filter);
+
+    let query = `SELECT * FROM settlements${whereClause} ORDER BY created_at ASC`;
 
     if (filter?.limit !== undefined) {
       query += " LIMIT ?";
@@ -221,6 +242,63 @@ export class SqliteSettlementStorage implements ISettlementStorage {
     const stmt = this.db.prepare<unknown[], SettlementRow>(query);
     const rows = stmt.all(...params);
     return rows.map((r) => this.mapRowToRecord(r));
+  }
+
+  async count(filter?: SettlementFilter): Promise<number> {
+    const { whereClause, params } = this.buildWhereClause(filter);
+    const query = `SELECT COUNT(*) as count FROM settlements${whereClause}`;
+    const stmt = this.db.prepare<unknown[], { count: number }>(query);
+    const row = stmt.get(...params);
+    return row?.count ?? 0;
+  }
+
+  async getSummary(filter?: SettlementFilter): Promise<SettlementSummary> {
+    const { whereClause, params } = this.buildWhereClause(filter);
+
+    const countQuery = `
+      SELECT
+        COUNT(*) as total,
+        SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed,
+        SUM(CASE WHEN status = 'failed' THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN status = 'pending' THEN 1 ELSE 0 END) as pending
+      FROM settlements${whereClause}
+    `;
+    const countStmt = this.db.prepare<unknown[], {
+      total: number;
+      completed: number | null;
+      failed: number | null;
+      pending: number | null;
+    }>(countQuery);
+    const counts = countStmt.get(...params);
+
+    const whereForRevenue = whereClause
+      ? `${whereClause} AND status = 'completed'`
+      : " WHERE status = 'completed'";
+    const revQuery = `SELECT asset, amount FROM settlements${whereForRevenue}`;
+    const revStmt = this.db.prepare<unknown[], { asset: string; amount: string }>(revQuery);
+    const revRows = revStmt.all(...params);
+
+    const revenueByAsset: Record<string, string> = {};
+    let totalMicroUsdc = 0n;
+
+    for (const row of revRows) {
+      const current = BigInt(revenueByAsset[row.asset] || "0");
+      const added = BigInt(row.amount || "0");
+      revenueByAsset[row.asset] = (current + added).toString();
+      if (row.asset.includes("USDC")) {
+        totalMicroUsdc += added;
+      }
+    }
+
+    return {
+      totalCount: counts?.total ?? 0,
+      completedCount: counts?.completed ?? 0,
+      failedCount: counts?.failed ?? 0,
+      pendingCount: counts?.pending ?? 0,
+      totalCompletedRevenueMicroUsdc: totalMicroUsdc.toString(),
+      totalCompletedRevenueUsd: `$${(Number(totalMicroUsdc) / 1e6).toFixed(4)}`,
+      revenueByAsset,
+    };
   }
 
   async close(): Promise<void> {

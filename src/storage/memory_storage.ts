@@ -3,6 +3,7 @@ import {
   SettlementFilter,
   SettlementRecord,
   SettlementStatus,
+  SettlementSummary,
   StatusUpdateDetails,
 } from "./types.js";
 
@@ -64,14 +65,66 @@ export class MemorySettlementStorage implements ISettlementStorage {
     if (filter?.payer) {
       results = results.filter((r) => r.payer === filter.payer);
     }
+    if (filter?.receiver) {
+      results = results.filter((r) => r.receiver === filter.receiver);
+    }
     if (filter?.status) {
       results = results.filter((r) => r.status === filter.status);
+    }
+    if (filter?.asset) {
+      results = results.filter((r) => r.asset === filter.asset);
+    }
+    if (filter?.fromDate !== undefined) {
+      results = results.filter((r) => r.createdAt >= filter.fromDate!);
+    }
+    if (filter?.toDate !== undefined) {
+      results = results.filter((r) => r.createdAt <= filter.toDate!);
     }
 
     const offset = filter?.offset ?? 0;
     const limit = filter?.limit ?? results.length;
 
     return results.slice(offset, offset + limit).map((r) => ({ ...r }));
+  }
+
+  async count(filter?: SettlementFilter): Promise<number> {
+    const list = await this.list({ ...filter, limit: undefined, offset: undefined });
+    return list.length;
+  }
+
+  async getSummary(filter?: SettlementFilter): Promise<SettlementSummary> {
+    const all = await this.list({ ...filter, limit: undefined, offset: undefined });
+    const revenueByAsset: Record<string, string> = {};
+    let totalMicroUsdc = 0n;
+    let completed = 0;
+    let failed = 0;
+    let pending = 0;
+
+    for (const r of all) {
+      if (r.status === "completed") {
+        completed++;
+        const current = BigInt(revenueByAsset[r.asset] || "0");
+        const added = BigInt(r.amount || "0");
+        revenueByAsset[r.asset] = (current + added).toString();
+        if (r.asset.includes("USDC")) {
+          totalMicroUsdc += added;
+        }
+      } else if (r.status === "failed") {
+        failed++;
+      } else if (r.status === "pending") {
+        pending++;
+      }
+    }
+
+    return {
+      totalCount: all.length,
+      completedCount: completed,
+      failedCount: failed,
+      pendingCount: pending,
+      totalCompletedRevenueMicroUsdc: totalMicroUsdc.toString(),
+      totalCompletedRevenueUsd: `$${(Number(totalMicroUsdc) / 1e6).toFixed(4)}`,
+      revenueByAsset,
+    };
   }
 
   async close(): Promise<void> {
