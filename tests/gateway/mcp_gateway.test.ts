@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
+import http from "http";
 import { Mnemonic, UserSigner } from "@multiversx/sdk-wallet";
 import { McpGateway } from "../../src/gateway/mcp_gateway.js";
 import { McpRegistryAdapter } from "../../src/services/mcp_registry_adapter.js";
@@ -39,10 +40,11 @@ describe("McpGateway (TDD)", () => {
   let proofLogger: McpProofLogger;
   let reputationClient: ReputationClient;
   let gateway: McpGateway;
+  let server: http.Server;
   let mockLogProof: any;
   let mockGiveFeedback: any;
 
-  beforeEach(() => {
+  beforeEach(async () => {
     registry = new McpRegistryAdapter();
     registry.registerLocalTool({
       name: "multiversx-analyzer",
@@ -93,11 +95,24 @@ describe("McpGateway (TDD)", () => {
       reputationClient,
       network: "multiversx:1",
     });
+
+    await new Promise<void>((resolve) => {
+      server = gateway.app.listen(0, "127.0.0.1", () => resolve());
+    });
+  });
+
+  afterEach(async () => {
+    if (server) {
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve, reject) => {
+        server.close((err) => (err ? reject(err) : resolve()));
+      });
+    }
   });
 
   describe("GET /mcp/v1/tools", () => {
     it("should return the list of available tools with pricing", async () => {
-      const res = await request(gateway.app).get("/mcp/v1/tools");
+      const res = await request(server).get("/mcp/v1/tools");
       expect(res.status).toBe(200);
       expect(res.body.tools).toBeInstanceOf(Array);
       expect(res.body.tools.length).toBe(1);
@@ -108,7 +123,7 @@ describe("McpGateway (TDD)", () => {
 
   describe("POST /mcp/v1/tools/call without payment", () => {
     it("should return HTTP 402 Payment Required challenge with standard x402 headers", async () => {
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/tools/call")
         .send({
           jsonrpc: "2.0",
@@ -130,7 +145,7 @@ describe("McpGateway (TDD)", () => {
     });
 
     it("should return 404 if tool does not exist", async () => {
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/tools/call")
         .send({
           jsonrpc: "2.0",
@@ -169,7 +184,7 @@ describe("McpGateway (TDD)", () => {
         })
       ).toString("base64");
 
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/tools/call")
         .set("PAYMENT-SIGNATURE", dummySig)
         .send({
@@ -196,7 +211,7 @@ describe("McpGateway (TDD)", () => {
     it("should reject invalid payment signature with 401/402", async () => {
       verifier.shouldSucceed = false;
 
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/tools/call")
         .set("PAYMENT-SIGNATURE", "invalid-base64")
         .send({
@@ -216,7 +231,7 @@ describe("McpGateway (TDD)", () => {
 
   describe("POST /mcp/v1/resources/read", () => {
     it("should issue 402 challenge when unpaid", async () => {
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/resources/read")
         .send({
           jsonrpc: "2.0",
@@ -246,7 +261,7 @@ describe("McpGateway (TDD)", () => {
         })
       ).toString("base64");
 
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/resources/read")
         .set("PAYMENT-SIGNATURE", validSig)
         .send({
@@ -265,7 +280,7 @@ describe("McpGateway (TDD)", () => {
     it("should reject invalid payment signature on resource read", async () => {
       verifier.shouldSucceed = false;
 
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/resources/read")
         .set("PAYMENT-SIGNATURE", "invalid-sig")
         .send({
@@ -282,7 +297,7 @@ describe("McpGateway (TDD)", () => {
 
   describe("POST /mcp/v1/reputation/feedback", () => {
     it("should forward rating to ReputationClient and return 200 with txHash", async () => {
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/reputation/feedback")
         .send({
           jobId: "job-mcp-123",
@@ -298,7 +313,7 @@ describe("McpGateway (TDD)", () => {
     });
 
     it("should reject invalid rating (< 1 or > 100)", async () => {
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/reputation/feedback")
         .send({
           jobId: "job-mcp-123",
@@ -333,7 +348,7 @@ describe("McpGateway (TDD)", () => {
         },
       };
 
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/tools/register")
         .send(toolPayload);
 
@@ -344,14 +359,14 @@ describe("McpGateway (TDD)", () => {
       expect(res.body.identityVerified).toBe(true);
 
       // Verify discovery list
-      const listRes = await request(gateway.app).get("/mcp/v1/tools");
+      const listRes = await request(server).get("/mcp/v1/tools");
       expect(listRes.status).toBe(200);
       const found = listRes.body.tools.find((t: any) => t.name === "dynamic-calculator");
       expect(found).toBeDefined();
     });
 
     it("should reject invalid payTo or invalid agentIdentity", async () => {
-      const resBadPayTo = await request(gateway.app)
+      const resBadPayTo = await request(server)
         .post("/mcp/v1/tools/register")
         .send({
           name: "bad-tool",
@@ -362,7 +377,7 @@ describe("McpGateway (TDD)", () => {
       expect(resBadPayTo.status).toBe(400);
 
       // Address has 62 chars and starts with erd1, but invalid bech32 checksum
-      const resBadChecksum = await request(gateway.app)
+      const resBadChecksum = await request(server)
         .post("/mcp/v1/tools/register")
         .send({
           name: "bad-checksum-tool",
@@ -373,7 +388,7 @@ describe("McpGateway (TDD)", () => {
       expect(resBadChecksum.status).toBe(400);
       expect(resBadChecksum.body.error).toContain("Invalid payTo address");
 
-      const resBadIdentity = await request(gateway.app)
+      const resBadIdentity = await request(server)
         .post("/mcp/v1/tools/register")
         .send({
           name: "bad-tool-2",
@@ -386,22 +401,22 @@ describe("McpGateway (TDD)", () => {
     });
 
     it("should return health status list and single tool health", async () => {
-      const resAll = await request(gateway.app).get("/mcp/v1/tools/health");
+      const resAll = await request(server).get("/mcp/v1/tools/health");
       expect(resAll.status).toBe(200);
       expect(resAll.body.status).toBe("ok");
       expect(Array.isArray(resAll.body.tools)).toBe(true);
 
-      const resSingle = await request(gateway.app).get("/mcp/v1/tools/multiversx-analyzer/health");
+      const resSingle = await request(server).get("/mcp/v1/tools/multiversx-analyzer/health");
       expect(resSingle.status).toBe(200);
       expect(resSingle.body.name).toBe("multiversx-analyzer");
       expect(resSingle.body.status).toBe("healthy");
 
-      const res404 = await request(gateway.app).get("/mcp/v1/tools/missing-tool/health");
+      const res404 = await request(server).get("/mcp/v1/tools/missing-tool/health");
       expect(res404.status).toBe(404);
     });
 
     it("should record tool heartbeat and update status", async () => {
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/tools/multiversx-analyzer/heartbeat")
         .send({ latencyMs: 22, status: "healthy" });
 
@@ -421,10 +436,10 @@ describe("McpGateway (TDD)", () => {
         payTo: validPayTo,
       };
 
-      await request(gateway.app).post("/mcp/v1/tools/register").send(toolPayload);
+      await request(server).post("/mcp/v1/tools/register").send(toolPayload);
 
       // Invoke tool without payment to get 402 challenge
-      const callRes = await request(gateway.app)
+      const callRes = await request(server)
         .post("/mcp/v1/tools/call")
         .send({
           jsonrpc: "2.0",
@@ -439,7 +454,7 @@ describe("McpGateway (TDD)", () => {
     });
 
     it("should reject forged or invalid MX-8004 agentIdentity cryptographic signature", async () => {
-      const res = await request(gateway.app)
+      const res = await request(server)
         .post("/mcp/v1/tools/register")
         .send({
           name: "forged-tool",
@@ -457,14 +472,14 @@ describe("McpGateway (TDD)", () => {
     });
 
     it("should serve interactive API documentation at /docs and /openapi.json", async () => {
-      const docsRes = await request(gateway.app).get("/docs");
+      const docsRes = await request(server).get("/docs");
       expect(docsRes.status).toBe(200);
       expect(docsRes.text).toContain("SwaggerUIBundle");
 
-      const swaggerRes = await request(gateway.app).get("/swagger");
+      const swaggerRes = await request(server).get("/swagger");
       expect(swaggerRes.status).toBe(200);
 
-      const openapiRes = await request(gateway.app).get("/openapi.json");
+      const openapiRes = await request(server).get("/openapi.json");
       expect(openapiRes.status).toBe(200);
       expect(openapiRes.body.openapi).toBe("3.0.3");
       expect(openapiRes.body.info.title).toContain("MCP Gateway");
@@ -478,13 +493,13 @@ describe("McpGateway (TDD)", () => {
         payTo: validPayTo,
       };
 
-      const reg1 = await request(gateway.app).post("/mcp/v1/tools/register").send(originalPayload);
+      const reg1 = await request(server).post("/mcp/v1/tools/register").send(originalPayload);
       expect(reg1.status).toBe(201);
 
       // Hijacker attempts to register with different payTo address
       const hijackerSigner = new UserSigner(Mnemonic.generate().deriveKey(0));
       const hijackerPayTo = hijackerSigner.getAddress().bech32();
-      const hijackAttempt = await request(gateway.app).post("/mcp/v1/tools/register").send({
+      const hijackAttempt = await request(server).post("/mcp/v1/tools/register").send({
         name: "protected-security-scanner",
         description: "Hijacked tool",
         pricing: { microUsdc: "50000" },
@@ -507,11 +522,11 @@ describe("McpGateway (TDD)", () => {
         payTo: ownerAddress,
       };
 
-      const initRes = await request(gateway.app).post("/mcp/v1/tools/register").send(initPayload);
+      const initRes = await request(server).post("/mcp/v1/tools/register").send(initPayload);
       expect(initRes.status).toBe(201);
 
       // Attempt to tamper price without signature
-      const tamperAttempt = await request(gateway.app).post("/mcp/v1/tools/register").send({
+      const tamperAttempt = await request(server).post("/mcp/v1/tools/register").send({
         name: "tamper-proof-oracle",
         description: "Tampered oracle",
         pricing: { microUsdc: "99000" },
@@ -525,7 +540,7 @@ describe("McpGateway (TDD)", () => {
       const msg = Buffer.from(`mcp-tool-register:tamper-proof-oracle:99000:${ownerAddress}`);
       const validSig = (await ownerSigner.sign(msg)).toString("hex");
 
-      const updateRes = await request(gateway.app).post("/mcp/v1/tools/register").send({
+      const updateRes = await request(server).post("/mcp/v1/tools/register").send({
         name: "tamper-proof-oracle",
         description: "Legitimate updated oracle",
         pricing: { microUsdc: "99000" },
@@ -543,7 +558,7 @@ describe("McpGateway (TDD)", () => {
       const attackerAddress = attackerSigner.getAddress().bech32();
       const attackerSig = (await attackerSigner.sign(Buffer.from(`mcp-tool-register:tamper-proof-oracle`))).toString("hex");
 
-      const spoofAttempt = await request(gateway.app).post("/mcp/v1/tools/register").send({
+      const spoofAttempt = await request(server).post("/mcp/v1/tools/register").send({
         name: "tamper-proof-oracle",
         description: "Spoofed oracle update",
         pricing: { microUsdc: "1000" },
