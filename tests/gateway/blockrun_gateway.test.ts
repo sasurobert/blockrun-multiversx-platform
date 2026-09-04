@@ -156,6 +156,7 @@ describe("BlockRun AI Gateway Proxy Server", () => {
 
   afterEach(async () => {
     if (server) {
+      server.closeAllConnections?.();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
@@ -573,6 +574,7 @@ describe("BlockRun AI Gateway Proxy Server", () => {
         expect(res3.status).toBe(429);
         expect(res3.body.error).toContain("Too many requests");
       } finally {
+        server.closeAllConnections?.();
         await new Promise<void>((resolve) => server.close(() => resolve()));
       }
     });

@@ -113,7 +113,8 @@ describe("ClawRouter High-Concurrency Chaos Benchmark", () => {
       console.log(`ClawRouter Chaos Benchmark: ${totalRequests} streaming requests processed in ${duration}ms (${reqsPerSec} req/sec)`);
       expect(duration).toBeLessThan(10000);
     } finally {
-      server.close();
+      server.closeAllConnections?.();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

@@ -129,9 +129,11 @@ describe("ToolCircuitBreaker & Timeout Guard (TDD)", () => {
 
     afterEach(async () => {
       if (upstreamServer) {
+        upstreamServer.closeAllConnections?.();
         await new Promise<void>((resolve) => upstreamServer.close(() => resolve()));
       }
       if (server) {
+        server.closeAllConnections?.();
         await new Promise<void>((resolve) => server!.close(() => resolve()));
       }
       registry.close();

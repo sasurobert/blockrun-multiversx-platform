@@ -536,6 +536,27 @@ describe("McpGateway (TDD)", () => {
       expect(updateRes.status).toBe(201);
       expect(updateRes.body.success).toBe(true);
       expect(updateRes.body.tool.pricing.microUsdc).toBe("99000");
+
+      // Attempt to tamper with signature from an attacker ownerAddress that differs from payTo
+      const attackerMnemonic = Mnemonic.generate();
+      const attackerSigner = new UserSigner(attackerMnemonic.deriveKey(0));
+      const attackerAddress = attackerSigner.getAddress().bech32();
+      const attackerSig = (await attackerSigner.sign(Buffer.from(`mcp-tool-register:tamper-proof-oracle`))).toString("hex");
+
+      const spoofAttempt = await request(gateway.app).post("/mcp/v1/tools/register").send({
+        name: "tamper-proof-oracle",
+        description: "Spoofed oracle update",
+        pricing: { microUsdc: "1000" },
+        payTo: ownerAddress,
+        agentIdentity: {
+          agentNonce: 1,
+          ownerAddress: attackerAddress,
+          signature: attackerSig,
+        },
+      });
+
+      expect(spoofAttempt.status).toBe(401);
+      expect(spoofAttempt.body.error).toContain("Invalid cryptographic signature proof from payTo address");
     });
 
     it("should guarantee zero payment settlement and invoke automated escrow refund on tool failure", async () => {

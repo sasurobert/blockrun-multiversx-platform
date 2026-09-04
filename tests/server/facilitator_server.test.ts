@@ -175,6 +175,7 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
 
   afterEach(async () => {
     if (server) {
+      server.closeAllConnections?.();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
@@ -465,6 +466,7 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
               : { error: res.text };
         expect(parsed.error).toBeDefined();
       } finally {
+        malformedServer.closeAllConnections?.();
         await new Promise<void>((r) => malformedServer.close(() => r()));
       }
     });
@@ -487,6 +489,7 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
         expect(res3.status).toBe(429);
         expect(res3.body.error).toContain("Too many requests");
       } finally {
+        rateLimitedServer.closeAllConnections?.();
         await new Promise<void>((r) => rateLimitedServer.close(() => r()));
       }
     });
@@ -507,6 +510,7 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
         expect(resAddr.status).toBe(503);
         expect(resAddr.body.error).toContain("not configured");
       } finally {
+        noRelayerServer.closeAllConnections?.();
         await new Promise<void>((r) => noRelayerServer.close(() => r()));
       }
     });

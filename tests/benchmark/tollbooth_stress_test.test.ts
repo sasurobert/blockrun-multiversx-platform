@@ -87,6 +87,7 @@ describe("Tollbooth Stress Test & Throughput Benchmark", () => {
       console.log(`Tollbooth Stress Test: ${totalRequests} pages converted in ${duration}ms (${pagesPerSec} pages/sec)`);
       expect(duration).toBeLessThan(10000);
     } finally {
+      server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });

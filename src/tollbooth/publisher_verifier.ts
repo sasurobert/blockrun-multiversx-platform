@@ -99,7 +99,12 @@ export class PublisherVerifier {
       if (expectedToken && (html.includes(expectedToken) || html.includes(`content="${expectedToken}"`))) {
         return true;
       }
-      if (html.includes(publisherAddress)) {
+      if (
+        html.includes(`name="x402-publisher" content="${publisherAddress}"`) ||
+        html.includes(`name="multiversx-publisher" content="${publisherAddress}"`) ||
+        html.includes(`property="x402-publisher" content="${publisherAddress}"`) ||
+        html.includes(`content="${publisherAddress}" name="x402-publisher"`)
+      ) {
         return true;
       }
       return false;

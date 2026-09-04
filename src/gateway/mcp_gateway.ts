@@ -17,6 +17,7 @@ import {
   McpToolsListResponse,
   McpToolRegisterRequestSchema,
   McpToolDefinition,
+  McpToolCallResult,
   ToolHealthStatus,
 } from "../domain/mcp_types.js";
 import { PaymentRequirements, X402PaymentPayload } from "../domain/types.js";
@@ -144,7 +145,7 @@ export class McpGateway {
       }
 
       if (sigToVerify) {
-        const signingAddress = body.agentIdentity?.ownerAddress || body.payTo;
+        const signingAddress = existingTool?.payTo || body.payTo;
         try {
           const verifier = new UserVerifier(new UserPublicKey(Address.newFromBech32(signingAddress).getPublicKey()));
           const cleanSig = sigToVerify.replace(/^0x/, "");
@@ -153,6 +154,7 @@ export class McpGateway {
           const candidateMessages = [
             Buffer.from(`mcp-tool-register:${body.name}:${body.agentIdentity?.agentNonce ?? ""}`),
             Buffer.from(`mcp-tool-register:${body.name}:${body.pricing.microUsdc}:${body.payTo}`),
+            Buffer.from(`mcp-tool-register:${body.name}:${body.pricing.microUsdc}`),
             Buffer.from(`mcp-tool-register:${body.name}:${body.payTo}`),
             Buffer.from(`mcp-tool-register:${body.name}`),
           ];
@@ -364,7 +366,20 @@ export class McpGateway {
       // Payment verified! Execute tool
       const toolArgs = (rpcReq.params?.arguments as Record<string, unknown>) ?? {};
       const startExec = Date.now();
-      const executionResult = await this.executor.executeTool(toolName, toolArgs);
+      let executionResult: McpToolCallResult;
+      try {
+        executionResult = await this.executor.executeTool(toolName, toolArgs);
+      } catch (execErr: unknown) {
+        executionResult = {
+          content: [
+            {
+              type: "text",
+              text: `Execution error: ${execErr instanceof Error ? execErr.message : String(execErr)}`,
+            },
+          ],
+          isError: true,
+        };
+      }
       const durationMs = Date.now() - startExec;
       this.registry.recordToolExecution(toolName, !executionResult.isError, durationMs);
 

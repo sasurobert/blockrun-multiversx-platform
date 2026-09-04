@@ -58,8 +58,16 @@ export class SandboxExecutor {
   ): SandboxExecutionResult {
     const startTime = Date.now();
 
-    // 1. Strict input length boundary check (64KB max)
-    if (typeof code !== "string" || code.length > 65536) {
+    // 1. Strict input boundary checks
+    if (typeof code !== "string") {
+      return {
+        result: null,
+        isError: true,
+        error: "Security Violation: code must be a string",
+        executionTimeMs: 0,
+      };
+    }
+    if (code.length > 65536) {
       return {
         result: null,
         isError: true,

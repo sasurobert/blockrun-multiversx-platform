@@ -98,6 +98,7 @@ describe("Autonomous Agent E2E Integration Suite (Client -> Gateway -> Settlemen
 
   afterEach(async () => {
     if (server) {
+      server.closeAllConnections?.();
       await new Promise<void>((resolve, reject) => {
         server.close((err) => (err ? reject(err) : resolve()));
       });
@@ -289,6 +290,7 @@ describe("Autonomous Agent E2E Integration Suite (Client -> Gateway -> Settlemen
         expect(res.choices[0].message.content).toBe("Custom Fine-Tuned Agent Model Output");
         expect(res.paymentReceipt).toBeDefined();
       } finally {
+        customServer?.closeAllConnections?.();
         await new Promise<void>((resolve, reject) => {
           customServer.close((err) => (err ? reject(err) : resolve()));
         });

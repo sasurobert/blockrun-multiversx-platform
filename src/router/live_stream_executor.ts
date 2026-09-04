@@ -144,7 +144,7 @@ export function createLiveStreamExecutor(options?: {
           for await (const chunk of options.secondaryFallbackExecutor(provider, request, signal)) {
             if (!prefixTrimmed) {
               fallbackAccumulated += chunk;
-              if (fallbackAccumulated.length > emittedText.length) {
+              if (fallbackAccumulated.length >= emittedText.length) {
                 if (fallbackAccumulated.startsWith(emittedText)) {
                   const delta = fallbackAccumulated.slice(emittedText.length);
                   prefixTrimmed = true;
@@ -183,7 +183,7 @@ export function createLiveStreamExecutor(options?: {
             if (!chunk.text) continue;
             if (!prefixTrimmed) {
               fallbackAccumulated += chunk.text;
-              if (fallbackAccumulated.length > emittedText.length) {
+              if (fallbackAccumulated.length >= emittedText.length) {
                 if (fallbackAccumulated.startsWith(emittedText)) {
                   const delta = fallbackAccumulated.slice(emittedText.length);
                   prefixTrimmed = true;

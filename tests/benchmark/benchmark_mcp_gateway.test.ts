@@ -91,6 +91,7 @@ describe("MCP Gateway Concurrency & Performance Benchmark", () => {
       console.log(`MCP Gateway Benchmark: ${totalRequests} requests completed in ${duration}ms (${reqsPerSec} req/sec)`);
       expect(duration).toBeLessThan(10000);
     } finally {
+      server.closeAllConnections?.();
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
