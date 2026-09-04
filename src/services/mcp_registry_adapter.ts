@@ -63,8 +63,7 @@ export class McpRegistryAdapter {
     this.queryServiceConfigFn = options.queryServiceConfigFn;
     this.cacheTtlMs = options.cacheTtlMs ?? 30_000;
 
-    const dbPathOrDb =
-      options.dbPathOrDb ?? process.env.SQLITE_DB_PATH ?? ":memory:";
+    const dbPathOrDb = options.dbPathOrDb ?? ":memory:";
 
     if (typeof dbPathOrDb === "string") {
       if (dbPathOrDb !== ":memory:") {

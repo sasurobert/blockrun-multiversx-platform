@@ -88,6 +88,16 @@ export interface ISettlementStorage {
   list(filter?: SettlementFilter): Promise<SettlementRecord[]>;
 
   /**
+   * Counts settlement records matching optional filter criteria.
+   */
+  count?(filter?: SettlementFilter): Promise<number>;
+
+  /**
+   * Aggregates revenue and status counts for settlements matching filter criteria.
+   */
+  getSummary?(filter?: SettlementFilter): Promise<SettlementSummary>;
+
+  /**
    * Closes or cleans up any underlying resources/connections.
    */
   close(): Promise<void>;

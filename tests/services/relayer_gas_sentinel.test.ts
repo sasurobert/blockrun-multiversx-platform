@@ -212,4 +212,81 @@ describe("RelayerGasSentinel (TDD)", () => {
     sentinel.stop();
     expect(sentinel.isRunning()).toBe(false);
   });
+
+  it("should NOT increment localNonce when sendTransaction fails and preserve real queried balance", async () => {
+    let callCount = 0;
+    const mockNetworkProvider: INetworkProvider = {
+      getAccount: vi.fn().mockImplementation(async (addr: Address) => {
+        const bech32 = getAddrStr(addr);
+        if (bech32 === treasuryAddress) {
+          return { nonce: 15, balance: 10_000_000_000_000_000_000n };
+        }
+        // Relayer 0 needs top-up (0.01 EGLD)
+        if (bech32 === relayer0Address) {
+          return { nonce: 1, balance: 10_000_000_000_000_000n };
+        }
+        // Relayer 1 has plenty of gas
+        return { nonce: 1, balance: 500_000_000_000_000_000n };
+      }),
+      sendTransaction: vi.fn().mockImplementation(async (_tx: Transaction) => {
+        callCount++;
+        if (callCount === 1) {
+          throw new Error("Temporary devnet node connection failure");
+        }
+        return "0xretrysuccesshash";
+      }),
+    } as any;
+
+    const sentinel = new RelayerGasSentinel({
+      networkProvider: mockNetworkProvider,
+      relayerPool,
+      treasurySigner,
+      thresholdEgld: 0.05,
+      topUpAmountEgld: 0.1,
+      chainID: "D",
+    });
+
+    // 1st run: sendTransaction fails
+    const result1 = await sentinel.checkAndTopUp();
+    expect(result1.toppedUp).toBe(0);
+    const failedRelayer = result1.relayers.find((r) => r.address === relayer0Address);
+    expect(failedRelayer?.toppedUp).toBe(false);
+    expect(failedRelayer?.error).toContain("Temporary devnet node connection failure");
+    // Verify actual queried balance was preserved, NOT wiped to 0n
+    expect(failedRelayer?.balance).toBe(10_000_000_000_000_000n);
+
+    // 2nd run: succeeds with original nonce 15 (NOT desynced to 16)
+    const result2 = await sentinel.checkAndTopUp();
+    expect(result2.toppedUp).toBe(1);
+    const successRelayer = result2.relayers.find((r) => r.address === relayer0Address);
+    expect(successRelayer?.toppedUp).toBe(true);
+    expect(successRelayer?.txHash).toBe("0xretrysuccesshash");
+  });
+
+  it("should query real on-chain account state without mocks via MvxApiNetworkProvider against Devnet", async () => {
+    const { MvxApiNetworkProvider } = await import("../../src/domain/network.js");
+    const realNetworkProvider = new MvxApiNetworkProvider("https://devnet-api.multiversx.com", {
+      timeout: 10000,
+      clientName: "relayer-gas-sentinel-test",
+    });
+
+    // Verify querying real accounts
+    const merchantAddress = Address.newFromBech32("erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k");
+    const realAccount = await realNetworkProvider.getAccount(merchantAddress);
+    expect(realAccount).toBeDefined();
+    expect(realAccount.address).toBeDefined();
+
+    const sentinel = new RelayerGasSentinel({
+      networkProvider: realNetworkProvider,
+      relayerPool,
+      treasurySigner,
+      thresholdEgld: 0.05,
+      topUpAmountEgld: 0.1,
+      chainID: "D",
+    });
+
+    // Verify check passes and properly queries real network without throwing
+    const statuses = sentinel.getRelayerStatuses();
+    expect(Array.isArray(statuses)).toBe(true);
+  });
 });

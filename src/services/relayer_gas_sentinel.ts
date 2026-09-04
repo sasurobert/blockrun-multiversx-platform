@@ -181,12 +181,14 @@ export class RelayerGasSentinel {
 
       for (const relayer of uniqueRelayers) {
         checked++;
+        let balance = 0n;
+        let balanceEgld = "0 EGLD";
         try {
           const relayerAddressObj = Address.newFromBech32(relayer.address);
           const account = (await this.networkProvider.getAccount(relayerAddressObj)) as any;
           const balanceStr = account?.balance?.toString() ?? "0";
-          const balance = BigInt(balanceStr);
-          const balanceEgld = formatEgld(balance);
+          balance = BigInt(balanceStr);
+          balanceEgld = formatEgld(balance);
           const needsTopUp = balance < this.threshold;
 
           this.latestStatuses.set(relayer.address, {
@@ -231,8 +233,8 @@ export class RelayerGasSentinel {
           results.push({
             address: relayer.address,
             shard: relayer.shard,
-            balance: 0n,
-            balanceEgld: "0 EGLD",
+            balance,
+            balanceEgld,
             toppedUp: false,
             error: errMsg,
           });
@@ -278,7 +280,8 @@ export class RelayerGasSentinel {
     const signature = await this.treasurySigner.sign(bytes);
     tx.signature = signature;
 
+    const txHash = await this.networkProvider.sendTransaction(tx);
     this.localNonce++;
-    return this.networkProvider.sendTransaction(tx);
+    return txHash;
   }
 }

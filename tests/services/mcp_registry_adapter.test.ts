@@ -202,4 +202,47 @@ describe("McpRegistryAdapter (TDD)", () => {
 
     adapter.close();
   });
+
+  it("should restore external tool HTTP handlers across server process restart via McpGateway", async () => {
+    const { McpGateway } = await import("../../src/gateway/mcp_gateway.js");
+    const { McpExecutor } = await import("../../src/services/mcp_executor.js");
+    const { MerchantPoolManager } = await import("../../src/services/merchant_pool.js");
+
+    // 1. First server session registers an external tool in SQLite
+    const adapter1 = new McpRegistryAdapter({ dbPathOrDb: tmpDbPath });
+    adapter1.registerLocalTool({
+      name: "persisted_weather_tool",
+      description: "Live weather tool with external HTTP endpoint",
+      inputSchema: { type: "object" },
+      pricing: {
+        microUsdc: "15000",
+        usdFormatted: "$0.015",
+        token: "USDC-350c4e",
+        serviceId: 88,
+        providerAgentNonce: 1,
+      },
+      endpointUrl: "https://weather.example.com/api/mcp",
+    });
+    adapter1.close();
+
+    // 2. Second server session starts with the exact same DB file
+    const adapter2 = new McpRegistryAdapter({ dbPathOrDb: tmpDbPath });
+    const executor2 = new McpExecutor();
+
+    expect(executor2.hasHandler("persisted_weather_tool")).toBe(false);
+
+    // Initializing gateway boots external handlers from durable registry
+    new McpGateway({
+      registry: adapter2,
+      executor: executor2,
+      merchantPool: new MerchantPoolManager(),
+      verifier: { verify: vi.fn() } as any,
+      network: "multiversx:D",
+    });
+
+    // Verify handler was dynamically restored and bound
+    expect(executor2.hasHandler("persisted_weather_tool")).toBe(true);
+
+    adapter2.close();
+  });
 });

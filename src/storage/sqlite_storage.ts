@@ -271,22 +271,23 @@ export class SqliteSettlementStorage implements ISettlementStorage {
     }>(countQuery);
     const counts = countStmt.get(...params);
 
-    const whereForRevenue = whereClause
-      ? `${whereClause} AND status = 'completed'`
-      : " WHERE status = 'completed'";
-    const revQuery = `SELECT asset, amount FROM settlements${whereForRevenue}`;
-    const revStmt = this.db.prepare<unknown[], { asset: string; amount: string }>(revQuery);
-    const revRows = revStmt.all(...params);
-
     const revenueByAsset: Record<string, string> = {};
     let totalMicroUsdc = 0n;
 
-    for (const row of revRows) {
-      const current = BigInt(revenueByAsset[row.asset] || "0");
-      const added = BigInt(row.amount || "0");
-      revenueByAsset[row.asset] = (current + added).toString();
-      if (row.asset.includes("USDC")) {
-        totalMicroUsdc += added;
+    if (!filter?.status || filter.status === "completed") {
+      const revFilter: SettlementFilter = { ...filter, status: "completed" };
+      const { whereClause: revWhere, params: revParams } = this.buildWhereClause(revFilter);
+      const revQuery = `SELECT asset, amount FROM settlements${revWhere}`;
+      const revStmt = this.db.prepare<unknown[], { asset: string; amount: string }>(revQuery);
+      const revRows = revStmt.all(...revParams);
+
+      for (const row of revRows) {
+        const current = BigInt(revenueByAsset[row.asset] || "0");
+        const added = BigInt(row.amount || "0");
+        revenueByAsset[row.asset] = (current + added).toString();
+        if (row.asset.includes("USDC")) {
+          totalMicroUsdc += added;
+        }
       }
     }
 

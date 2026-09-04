@@ -615,17 +615,23 @@ export class McpGateway {
 
   public createExternalToolHandler(toolName: string, endpointUrl: string) {
     return async (args: Record<string, unknown>) => {
-      const startTime = Date.now();
       try {
-        const result = await this.circuitBreaker.execute(toolName, async (signal) => {
+        const timeoutMs = this.circuitBreaker.getTimeoutMs() || 15_000;
+        const result = await this.circuitBreaker.execute(toolName, async (breakerSignal) => {
+          // Explicitly wrap external tool HTTP requests with AbortSignal.timeout(15000)
+          const timeoutSignal = AbortSignal.timeout(timeoutMs);
+          const combinedSignal =
+            typeof (AbortSignal as any).any === "function"
+              ? (AbortSignal as any).any([breakerSignal, timeoutSignal])
+              : breakerSignal;
+
           const resp = await fetch(endpointUrl, {
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({ name: toolName, arguments: args }),
-            signal,
+            signal: combinedSignal,
           });
 
-          const latencyMs = Date.now() - startTime;
           if (!resp.ok) {
             const errText = await resp.text().catch(() => "");
             throw new Error(`Upstream tool error (${resp.status}): ${errText}`);
@@ -633,7 +639,6 @@ export class McpGateway {
 
           const data = (await resp.json().catch(() => ({}))) as any;
           const isError = Boolean(data?.isError);
-          this.registry.recordToolExecution(toolName, !isError, latencyMs);
           return {
             content: Array.isArray(data?.content)
               ? data.content
@@ -645,20 +650,26 @@ export class McpGateway {
 
         return result;
       } catch (err: unknown) {
-        const latencyMs = Date.now() - startTime;
-        this.registry.recordToolExecution(toolName, false, latencyMs);
-
-        if (err instanceof ToolCircuitOpenError) {
+        if (
+          err instanceof ToolCircuitOpenError ||
+          (err as any)?.code === "TOOL_CIRCUIT_OPEN"
+        ) {
           return {
-            content: [{ type: "text", text: err.message }],
+            content: [{ type: "text", text: (err as any).message }],
             isError: true,
             errorCode: "TOOL_CIRCUIT_OPEN",
           };
         }
 
-        if (err instanceof ToolUpstreamTimeoutError) {
+        if (
+          err instanceof ToolUpstreamTimeoutError ||
+          (err as any)?.code === "TOOL_UPSTREAM_TIMEOUT" ||
+          (err as any)?.name === "TimeoutError" ||
+          (err as any)?.name === "ToolUpstreamTimeoutError" ||
+          (err instanceof Error && (err.message.includes("timed out") || err.message.includes("Timeout")))
+        ) {
           return {
-            content: [{ type: "text", text: err.message }],
+            content: [{ type: "text", text: (err as any).message }],
             isError: true,
             errorCode: "TOOL_UPSTREAM_TIMEOUT",
           };

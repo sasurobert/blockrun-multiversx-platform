@@ -1,8 +1,9 @@
-import { describe, it, expect, beforeEach, vi } from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import request from "supertest";
 import { Express } from "express";
 import { createBlockRunGateway } from "../../src/gateway/blockrun_gateway.js";
 import { MemorySettlementStorage } from "../../src/storage/memory_storage.js";
+import { SqliteSettlementStorage } from "../../src/storage/sqlite_storage.js";
 import { SettlementRecord } from "../../src/storage/types.js";
 import { IVerifierService } from "../../src/services/verifier.js";
 
@@ -197,6 +198,56 @@ describe("Merchant Settlement History & Invoicing API (TDD)", () => {
       const res = await request(app).get("/api/v1/settlements/export.csv?status=failed");
       expect(res.status).toBe(200);
       expect(res.text).toContain('""quoted""');
+    });
+  });
+
+  describe("Integration: Persistent SqliteSettlementStorage Invoicing", () => {
+    let sqliteStorage: SqliteSettlementStorage;
+    let sqliteApp: Express;
+
+    beforeEach(async () => {
+      sqliteStorage = new SqliteSettlementStorage(":memory:");
+      for (const r of records) {
+        await sqliteStorage.save(r);
+      }
+
+      const mockVerifier: IVerifierService = {
+        verify: vi.fn(),
+      } as any;
+
+      sqliteApp = createBlockRunGateway({
+        verifier: mockVerifier,
+        storage: sqliteStorage,
+        payTo: merchantA,
+        rateLimit: { enabled: false },
+      });
+    });
+
+    afterEach(async () => {
+      await sqliteStorage.close();
+    });
+
+    it("should compute accurate summary and pagination from real SQLite queries", async () => {
+      const res = await request(sqliteApp).get("/api/v1/settlements?merchant=" + merchantA);
+      expect(res.status).toBe(200);
+      expect(res.body.settlements.length).toBe(3);
+      expect(res.body.pagination.total).toBe(3);
+      expect(res.body.summary.completedCount).toBe(2);
+      expect(res.body.summary.failedCount).toBe(1);
+      expect(res.body.summary.totalCompletedRevenueMicroUsdc).toBe("35000");
+      expect(res.body.summary.revenueByAsset["USDC-350c4e"]).toBe("35000");
+    });
+
+    it("should export CSV cleanly from real SQLite storage with RFC-4180 headers", async () => {
+      const res = await request(sqliteApp).get("/api/v1/settlements/export.csv?merchant=" + merchantA);
+      expect(res.status).toBe(200);
+      expect(res.headers["content-type"]).toContain("text/csv");
+      const lines = res.text.trim().split("\r\n");
+      expect(lines.length).toBe(4); // Header + 3 records
+      expect(lines[0]).toBe("id,signatureHash,payer,receiver,asset,amount,status,txHash,createdAt,date,errorCode,errorReason");
+      expect(lines[1]).toContain("settle-1");
+      expect(lines[2]).toContain("settle-2");
+      expect(lines[3]).toContain("settle-3");
     });
   });
 });

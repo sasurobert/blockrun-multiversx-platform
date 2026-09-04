@@ -218,6 +218,9 @@ export async function startServers() {
   // 8. Graceful Shutdown Handlers
   const shutdown = async () => {
     console.log("\nShutting down gracefully...");
+    if (gasSentinel) {
+      gasSentinel.stop();
+    }
     await settlementQueue.drain();
     settlementQueue.clear();
     await new Promise<void>((resolve) => facilitatorServer.close(() => resolve()));
@@ -235,6 +238,7 @@ export async function startServers() {
     gatewayServer,
     settlementQueue,
     storage,
+    gasSentinel,
   };
 }
 
