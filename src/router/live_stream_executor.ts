@@ -27,12 +27,16 @@ export function createLiveStreamExecutor(options?: {
     const isGemini =
       provider.id === "gemini" ||
       provider.id === "google" ||
-      request.model.includes("gemini") ||
+      provider.id.includes("gemini") ||
+      request.model.toLowerCase().includes("gemini") ||
       provider.name.toLowerCase().includes("gemini");
 
     if (isGemini && geminiProvider.isAvailable()) {
+      const geminiModel = request.model.toLowerCase().includes("gemini")
+        ? request.model.replace(/^google\//, "")
+        : "gemini-2.5-flash-lite";
       for await (const chunk of geminiProvider.streamCompletion(request.messages, {
-        model: request.model,
+        model: geminiModel,
         maxTokens: request.max_tokens,
         signal,
       })) {

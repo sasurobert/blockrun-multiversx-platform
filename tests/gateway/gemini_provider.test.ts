@@ -69,4 +69,31 @@ describe("GeminiProvider", () => {
       global.fetch = originalFetch;
     }
   });
+
+  it("should normalize alien model names to default model", async () => {
+    const provider = new GeminiProvider("mock-key");
+    const originalFetch = global.fetch;
+
+    let capturedUrl = "";
+    global.fetch = vi.fn().mockImplementation((url: string) => {
+      capturedUrl = url;
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({
+          candidates: [{ content: { parts: [{ text: "response" }] } }],
+          usageMetadata: { promptTokenCount: 5, candidatesTokenCount: 5, totalTokenCount: 10 },
+        }),
+      });
+    });
+
+    try {
+      await provider.generateCompletion([{ role: "user", content: "hi" }], {
+        model: "llama-3.3-70b",
+      });
+      expect(capturedUrl).toContain("models/gemini-2.5-flash-lite");
+      expect(capturedUrl).not.toContain("llama-3.3-70b");
+    } finally {
+      global.fetch = originalFetch;
+    }
+  });
 });

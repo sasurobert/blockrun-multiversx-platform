@@ -92,9 +92,6 @@ export const TollboothDashboard: React.FC = () => {
     setChallengeDetails(null);
     setExtractedResult(null);
 
-    // Simulate sending request with Bot User-Agent
-    await new Promise((r) => setTimeout(r, 400));
-
     const isHuman = selectedBot.includes("Mozilla") && !selectedBot.includes("Bot");
     if (isHuman) {
       // Direct pass-through
@@ -109,19 +106,57 @@ export const TollboothDashboard: React.FC = () => {
       return;
     }
 
-    // Bot intercepted!
+    try {
+      const res = await fetch(`${API_BASE}/tollbooth/docs`, {
+        headers: { "User-Agent": selectedBot },
+      });
+
+      if (res.status === 402) {
+        const data = await res.json().catch(() => ({}));
+        const wwwAuth = res.headers.get("www-authenticate") || "";
+        const xPaymentReq = res.headers.get("x-payment-required") || "";
+        const reqs = data?.accepts?.[0] || {};
+
+        setChallengeDetails({
+          status: 402,
+          statusText: "Payment Required",
+          headers: {
+            "WWW-Authenticate":
+              wwwAuth ||
+              `x402 scheme="exact", network="multiversx:D", amount="${reqs.amount || "3250"}", asset="USDC-350c4e"`,
+            "X-Payment-Required": xPaymentReq || JSON.stringify(data),
+            "Content-Type": "application/json",
+          },
+          requirements: {
+            costMicroUsdc: reqs.amount || "3250",
+            costUsd: `$${((parseInt(reqs.amount || "3250", 10)) / 1_000_000).toFixed(6)}`,
+            merchantAddress:
+              reqs.payTo || "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k",
+            shard: reqs.extra?.shard ?? 0,
+            executionType: reqs.extra?.executionType || "intra-shard-0.6s",
+          },
+        });
+        setTestStage("intercepted_402");
+        return;
+      }
+    } catch {
+      // Network fallback
+    }
+
+    // Bot intercepted fallback
     setChallengeDetails({
       status: 402,
       statusText: "Payment Required",
       headers: {
-        "WWW-Authenticate": 'x402 scheme="exact", network="multiversx:D", amount="10000", asset="USDC-c76f1f", payTo="erd1ka0yrspygvjtktyzxu58ufn0kujkqgx4gq2ch5ev2aqjcem9jcqqkntrmv"',
-        "X-Payment-Required": "eyJ4NDAyVmVyc2lvbiI6MiwiYWNjZXB0cyI6W3sic2NoZW1lIjoiZXhhY3QiLCJhbW91bnQiOiIxMDAwMCJ9XX0=",
+        "WWW-Authenticate":
+          'x402 scheme="exact", network="multiversx:D", amount="3250", asset="USDC-350c4e", payTo="erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k"',
+        "X-Payment-Required": "eyJ4NDAyVmVyc2lvbiI6MiwiYWNjZXB0cyI6W3sic2NoZW1lIjoiZXhhY3QiLCJhbW91bnQiOiIzMjUwIn1dfQ==",
         "Content-Type": "application/json",
       },
       requirements: {
-        costMicroUsdc: "10000",
-        costUsd: "$0.01",
-        merchantAddress: "erd1ka0yrspygvjtktyzxu58ufn0kujkqgx4gq2ch5ev2aqjcem9jcqqkntrmv",
+        costMicroUsdc: "3250",
+        costUsd: "$0.00325",
+        merchantAddress: "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k",
         shard: 0,
         executionType: "intra-shard-0.6s",
       },

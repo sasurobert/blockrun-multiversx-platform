@@ -95,7 +95,8 @@ export class GeminiProvider {
       throw new Error("Gemini API key is not configured");
     }
 
-    const modelName = options?.model?.replace(/^google\//, "") || this.defaultModel;
+    const rawModel = (options?.model?.replace(/^google\//, "") || this.defaultModel).toLowerCase();
+    const modelName = rawModel.includes("gemini") ? rawModel : this.defaultModel;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:generateContent?key=${this.apiKey}`;
 
     const body = JSON.stringify(this.formatPayload(messages, options));
@@ -147,7 +148,8 @@ export class GeminiProvider {
       throw new Error("Gemini API key is not configured");
     }
 
-    const modelName = options?.model?.replace(/^google\//, "") || this.defaultModel;
+    const rawModel = (options?.model?.replace(/^google\//, "") || this.defaultModel).toLowerCase();
+    const modelName = rawModel.includes("gemini") ? rawModel : this.defaultModel;
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(modelName)}:streamGenerateContent?key=${this.apiKey}&alt=sse`;
 
     const body = JSON.stringify(this.formatPayload(messages, options));

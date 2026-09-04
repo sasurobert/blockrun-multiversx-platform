@@ -1,3 +1,5 @@
+import fs from "fs";
+import path from "path";
 import { describe, it, expect } from "vitest";
 import { TwoPhaseReconciler } from "../../src/router/two_phase_reconciler.js";
 
@@ -26,8 +28,6 @@ describe("TwoPhaseReconciler (TDD)", () => {
   });
 
   it("should persist session credits in SQLite across restarts", () => {
-    const fs = require("fs");
-    const path = require("path");
     const tmpDir = path.resolve("./data/test_tmp");
     if (!fs.existsSync(tmpDir)) fs.mkdirSync(tmpDir, { recursive: true });
     const dbPath = path.resolve(tmpDir, `reconciler_test_${Date.now()}.db`);

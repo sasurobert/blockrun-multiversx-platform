@@ -17,12 +17,14 @@ async function main() {
   const apiUrl = process.env.MULTIVERSX_API_URL || "https://devnet-api.multiversx.com";
   const network = process.env.MULTIVERSX_NETWORK || "multiversx:D";
   const sqliteDbPath = process.env.SQLITE_DB_PATH || "./data/settlements.db";
+  const usdcToken = process.env.USDC_TOKEN_IDENTIFIER || (network.includes(":D") ? "USDC-350c4e" : "USDC-c76f1f");
 
   console.log(`============================================================`);
   console.log(`         Starting MultiversX ClawRouter Gateway             `);
   console.log(`============================================================`);
   console.log(`Port:           ${port}`);
   console.log(`Network:        ${network}`);
+  console.log(`Token:          ${usdcToken}`);
   console.log(`API URL:        ${apiUrl}`);
   console.log(`SQLite DB:      ${sqliteDbPath}`);
 
@@ -122,6 +124,7 @@ async function main() {
     verifier,
     merchantPool,
     network,
+    tokenIdentifier: usdcToken,
     matrix,
     dispatcher,
     reconciler,

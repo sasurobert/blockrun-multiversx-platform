@@ -290,28 +290,62 @@ async function main() {
 
   executor.registerHandler("onchain_agent_reputation", async (args) => {
     const nonce = Number(args.agentNonce || 1);
-    const repContract = process.env.MX8004_REPUTATION_REGISTRY || "erd1qqqqqqqqqqqqqpgqvj462tzng7nz4muwd89lz76cxdc03hd2dnyqus85yp";
-    return {
-      content: [
-        {
-          type: "text",
-          text: JSON.stringify(
-            {
-              agentNonce: nonce,
-              reputationContract: repContract,
-              verifiedStatus: "ACTIVE",
-              averageRatingScore: 98.4,
-              completedJobsCount: 42,
-              slashCount: 0,
-              trustTier: "TIER_A_VERIFIED",
-            },
-            null,
-            2
-          ),
-        },
-      ],
-      isError: false,
-    };
+    const repContract =
+      process.env.MX8004_REPUTATION_REGISTRY ||
+      "erd1qqqqqqqqqqqqqpgqvj462tzng7nz4muwd89lz76cxdc03hd2dnyqus85yp";
+    const nonceHex = nonce.toString(16).padStart(2, "0");
+
+    try {
+      const [vmRes, accRes] = await Promise.all([
+        fetch(`${apiUrl}/vm-values/query`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            scAddress: repContract,
+            funcName: "get_reputation_score",
+            args: [nonceHex],
+          }),
+        }),
+        fetch(`${apiUrl}/accounts/${repContract}`),
+      ]);
+
+      const vmData = (vmRes.ok ? await vmRes.json() : null) as any;
+      const accData = (accRes.ok ? await accRes.json() : null) as any;
+
+      let score = 0;
+      if (vmData?.data?.data?.returnData?.[0]) {
+        const buf = Buffer.from(vmData.data.data.returnData[0], "base64");
+        score = buf.length > 0 ? parseInt(buf.toString("hex"), 16) : 0;
+      }
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                agentNonce: nonce,
+                reputationContract: repContract,
+                codeHash: accData?.codeHash || "ACTIVE",
+                verifiedStatus: accData?.codeHash ? "ACTIVE_ON_CHAIN" : "UNKNOWN",
+                reputationScore: score,
+                trustTier: score >= 80 ? "TIER_A" : score > 0 ? "TIER_B" : "NEW_AGENT_UNRATED",
+                network,
+                liveOnChainVerification: true,
+              },
+              null,
+              2
+            ),
+          },
+        ],
+        isError: false,
+      };
+    } catch (err: any) {
+      return {
+        content: [{ type: "text", text: `On-chain reputation query failed: ${err.message}` }],
+        isError: true,
+      };
+    }
   });
 
   const gateway = new McpGateway({

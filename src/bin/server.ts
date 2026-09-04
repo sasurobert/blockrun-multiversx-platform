@@ -153,6 +153,8 @@ export async function startServers() {
     verifier,
     settlementQueue,
     network,
+    tokenIdentifier: usdcToken,
+    storage,
     originUrl: `http://localhost:${gatewayPort}`,
   });
   gatewayApp.use("/tollbooth", tollbooth.app);

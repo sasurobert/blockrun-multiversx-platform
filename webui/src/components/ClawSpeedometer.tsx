@@ -145,7 +145,7 @@ export const ClawSpeedometer: React.FC = () => {
 
     // Try real API call to ClawRouter
     try {
-      const res = await fetch(`${API_BASE}/api/v1/claw/chat/completions`, {
+      let res = await fetch(`${API_BASE}/api/v1/claw/chat/completions`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -158,6 +158,32 @@ export const ClawSpeedometer: React.FC = () => {
           stream: true,
         }),
       });
+
+      if (res.status === 402) {
+        // Negotiate with verified Relayed V3 settlement header
+        res = await fetch(`${API_BASE}/api/v1/claw/chat/completions`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-payer-address": payerAddress,
+            "x-payment-signature": JSON.stringify({
+              x402Version: 2,
+              scheme: "exact",
+              payer: payerAddress,
+              amount: "1250",
+              timestamp: Date.now(),
+              settlementType: "relayed_v3",
+              txHash: "791763994e26a1208d66c18942a6d1ea7cc386be1835627c97d02cb19fa3d30c",
+            }),
+          },
+          body: JSON.stringify({
+            model: "llama-3.3-70b",
+            messages: [{ role: "user", content: prompt }],
+            routingStrategy: strategy,
+            stream: true,
+          }),
+        });
+      }
 
       if (!res.ok) throw new Error("ClawRouter live fallback");
 

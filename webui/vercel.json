@@ -16,6 +16,14 @@
       "destination": "https://blockrun.178-105-84-73.sslip.io/api/:path*"
     },
     {
+      "source": "/v1/:path*",
+      "destination": "https://blockrun.178-105-84-73.sslip.io/v1/:path*"
+    },
+    {
+      "source": "/tools/:path*",
+      "destination": "https://blockrun.178-105-84-73.sslip.io/tools/:path*"
+    },
+    {
       "source": "/:path*",
       "destination": "/index.html"
     }

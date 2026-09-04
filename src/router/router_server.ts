@@ -24,6 +24,7 @@ export interface ClawRouterServerOptions {
   merchantPool?: MerchantPoolManager;
   verifier: IVerifierService;
   network?: string;
+  tokenIdentifier?: string;
 }
 
 export class ClawRouterServer {
@@ -38,6 +39,7 @@ export class ClawRouterServer {
   public merchantPool: MerchantPoolManager;
   public verifier: IVerifierService;
   public network: string;
+  public tokenIdentifier: string;
 
   constructor(options: ClawRouterServerOptions) {
     this.matrix = options.matrix ?? new ArbitrageMatrix();
@@ -50,6 +52,10 @@ export class ClawRouterServer {
     this.merchantPool = options.merchantPool ?? new MerchantPoolManager();
     this.verifier = options.verifier;
     this.network = options.network ?? "multiversx:1";
+    this.tokenIdentifier =
+      options.tokenIdentifier ||
+      process.env.USDC_TOKEN_IDENTIFIER ||
+      (this.network.includes(":D") ? "USDC-350c4e" : "USDC-c76f1f");
 
     this.app = express();
     this.app.use(cors());
@@ -158,7 +164,7 @@ export class ClawRouterServer {
         scheme: "exact",
         network: this.network as any,
         amount: requiredMicroUsdc,
-        asset: "USDC-c76f1f",
+        asset: this.tokenIdentifier,
         payTo: merchantAddress as any,
         maxTimeoutSeconds: 300,
         extra: {

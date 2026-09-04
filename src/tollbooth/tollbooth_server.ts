@@ -10,6 +10,7 @@ import { PipelinedSettlementQueue } from "../services/pipelined_settlement_queue
 import { SettlementQueue } from "../services/settlement_queue.js";
 import { IVerifierService } from "../services/verifier.js";
 import { PaymentRequirements, X402PaymentPayload } from "../domain/types.js";
+import { ISettlementStorage } from "../storage/types.js";
 
 export interface TollboothServerOptions {
   classifier?: BotClassifier;
@@ -22,6 +23,8 @@ export interface TollboothServerOptions {
   originUrl?: string;
   originFetch?: (url: string, init?: RequestInit) => Promise<globalThis.Response>;
   network?: string;
+  tokenIdentifier?: string;
+  storage?: ISettlementStorage;
 }
 
 export class TollboothServer {
@@ -36,6 +39,8 @@ export class TollboothServer {
   public originUrl: string;
   public originFetch: (url: string, init?: RequestInit) => Promise<globalThis.Response>;
   public network: string;
+  public tokenIdentifier: string;
+  public storage?: ISettlementStorage;
 
   constructor(options: TollboothServerOptions) {
     this.classifier = options.classifier ?? new BotClassifier();
@@ -48,6 +53,11 @@ export class TollboothServer {
     this.originUrl = options.originUrl ?? "http://localhost:8080";
     this.originFetch = options.originFetch ?? (globalThis.fetch as any);
     this.network = options.network ?? "multiversx:1";
+    this.storage = options.storage;
+    this.tokenIdentifier =
+      options.tokenIdentifier ||
+      process.env.USDC_TOKEN_IDENTIFIER ||
+      (this.network.includes(":D") ? "USDC-350c4e" : "USDC-c76f1f");
 
     this.app = express();
     this.app.use(cors());
@@ -141,7 +151,7 @@ export class TollboothServer {
         scheme: "exact",
         network: this.network as any,
         amount: toll.microUsdc,
-        asset: "USDC-c76f1f",
+        asset: this.tokenIdentifier,
         payTo: toll.merchantAddress as any,
         maxTimeoutSeconds: 300,
         extra: {
