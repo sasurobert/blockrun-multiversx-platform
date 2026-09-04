@@ -63,6 +63,7 @@ export class FleetService {
   private bots: BotConfig[];
   private runsCount: Map<string, number> = new Map();
   private lastTxs: Map<string, string> = new Map();
+  private apiUrl: string;
 
   constructor(options?: {
     apiUrl?: string;
@@ -73,7 +74,8 @@ export class FleetService {
     walletsDir?: string;
   }) {
     const apiUrl = options?.apiUrl || process.env.MULTIVERSX_API_URL || "https://devnet-api.multiversx.com";
-    this.networkProvider = new ApiNetworkProvider(apiUrl, { clientName: "blockrun-fleet" });
+    this.apiUrl = apiUrl.replace(/\/$/, "");
+    this.networkProvider = new ApiNetworkProvider(this.apiUrl, { clientName: "blockrun-fleet" });
     this.geminiProvider = new GeminiProvider(options?.geminiApiKey || process.env.GEMINI_API_KEY);
     this.merchantPool = options?.merchantPool || new MerchantPoolManager();
     this.merchantAddress =
@@ -163,7 +165,7 @@ export class FleetService {
       const acc = await this.networkProvider.getAccount({ bech32: () => agentAddress } as any);
       egldBalance = (Number(acc.balance) / 1e18).toFixed(6);
 
-      const res = await fetch(`https://devnet-api.multiversx.com/accounts/${agentAddress}/tokens`);
+      const res = await fetch(`${this.apiUrl}/accounts/${agentAddress}/tokens`);
       if (res.ok) {
         const list = (await res.json()) as any;
         const token = Array.isArray(list) ? list.find((t: any) => t.identifier === this.tokenId) : null;

@@ -18,6 +18,7 @@ export interface TreasuryStatus {
 }
 
 export class TreasurySweeperService {
+  private apiUrl: string;
   private networkProvider: ApiNetworkProvider;
   private merchantPool: MerchantPoolManager;
   private masterTreasuryAddress: string;
@@ -32,7 +33,8 @@ export class TreasurySweeperService {
     tokenId?: string;
   }) {
     const apiUrl = options?.apiUrl || process.env.MULTIVERSX_API_URL || "https://devnet-api.multiversx.com";
-    this.networkProvider = new ApiNetworkProvider(apiUrl, { clientName: "treasury-sweeper" });
+    this.apiUrl = apiUrl.replace(/\/$/, "");
+    this.networkProvider = new ApiNetworkProvider(this.apiUrl, { clientName: "treasury-sweeper" });
     this.merchantPool = options?.merchantPool || new MerchantPoolManager();
     this.masterTreasuryAddress =
       options?.masterTreasuryAddress ||
@@ -57,7 +59,7 @@ export class TreasurySweeperService {
         const acc = await this.networkProvider.getAccount({ bech32: () => m.address } as any);
         egldBalance = (Number(acc.balance) / 1e18).toFixed(6);
 
-        const res = await fetch(`https://devnet-api.multiversx.com/accounts/${m.address}/tokens`);
+        const res = await fetch(`${this.apiUrl}/accounts/${m.address}/tokens`);
         if (res.ok) {
           const list = (await res.json()) as any;
           const token = Array.isArray(list) ? list.find((t: any) => t.identifier === this.tokenId) : null;

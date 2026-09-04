@@ -114,6 +114,17 @@ class TestBlockRunMvxPython(unittest.TestCase):
             self.assertEqual(res["routing"]["tier"], "eco")
             self.assertEqual(res["routing"]["selectedModel"], "deepseek/deepseek-chat")
 
+    def test_multiversx_x402_import(self):
+        import multiversx_x402
+        self.assertEqual(multiversx_x402.__version__, "1.0.0")
+        client = multiversx_x402.MultiversxX402Client(
+            signer=self.signer,
+            gateway_url="http://127.0.0.1:3000",
+            network="multiversx:D",
+        )
+        self.assertTrue(client.get_wallet_address().startswith("erd1"))
+
 
 if __name__ == "__main__":
     unittest.main()
+

@@ -1,6 +1,8 @@
 import express, { Express, Request, Response } from "express";
 import cors from "cors";
 import crypto from "crypto";
+import { Address } from "@multiversx/sdk-core";
+import { UserPublicKey, UserVerifier } from "@multiversx/sdk-wallet";
 import { McpRegistryAdapter } from "../services/mcp_registry_adapter.js";
 import { McpExecutor } from "../services/mcp_executor.js";
 import { MerchantPoolManager } from "../services/merchant_pool.js";
@@ -12,6 +14,9 @@ import { SettlementQueue } from "../services/settlement_queue.js";
 import {
   McpRpcRequestSchema,
   McpToolsListResponse,
+  McpToolRegisterRequestSchema,
+  McpToolDefinition,
+  ToolHealthStatus,
 } from "../domain/mcp_types.js";
 import { PaymentRequirements, X402PaymentPayload } from "../domain/types.js";
 
@@ -66,6 +71,167 @@ export class McpGateway {
       res.json(response);
     });
 
+    // Dynamic Tool Registry: Register new MCP tool endpoint
+    this.app.post("/mcp/v1/tools/register", async (req: Request, res: Response) => {
+      const parseResult = McpToolRegisterRequestSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        return res.status(400).json({
+          error: "Invalid tool registration schema",
+          details: parseResult.error.errors,
+        });
+      }
+
+      const body = parseResult.data;
+
+      // Validate payTo address
+      try {
+        Address.newFromBech32(body.payTo);
+      } catch {
+        return res.status(400).json({
+          error: "Invalid payTo address: Must be a valid 62-character MultiversX bech32 address (erd1...)",
+        });
+      }
+
+      // MX-8004 Identity Verification
+      let identityVerified = false;
+      if (body.agentIdentity) {
+        const { agentNonce, ownerAddress, signature } = body.agentIdentity;
+        if (agentNonce < 0) {
+          return res.status(400).json({ error: "Invalid MX-8004 agentNonce: must be non-negative" });
+        }
+        if (ownerAddress) {
+          try {
+            Address.newFromBech32(ownerAddress);
+          } catch {
+            return res.status(400).json({
+              error: "Invalid MX-8004 identity: ownerAddress must be a valid MultiversX bech32 address",
+            });
+          }
+        }
+        if (signature) {
+          if (!ownerAddress) {
+            return res.status(400).json({ error: "ownerAddress is required when signature is provided" });
+          }
+          try {
+            const verifier = new UserVerifier(new UserPublicKey(Address.newFromBech32(ownerAddress).getPublicKey()));
+            const message = Buffer.from(`mcp-tool-register:${body.name}:${agentNonce}`);
+            const cleanSig = signature.replace(/^0x/, "");
+            const sigBuf = Buffer.from(cleanSig, cleanSig.length === 128 ? "hex" : "base64");
+            const isValidSig = verifier.verify(message, sigBuf);
+            if (!isValidSig) {
+              return res.status(401).json({ error: "Invalid MX-8004 agentIdentity cryptographic signature" });
+            }
+            identityVerified = true;
+          } catch (sigErr: unknown) {
+            return res.status(400).json({
+              error: `Cryptographic identity verification failed: ${sigErr instanceof Error ? sigErr.message : String(sigErr)}`,
+            });
+          }
+        } else {
+          identityVerified = Boolean(ownerAddress);
+        }
+      }
+
+      const microUsdc = body.pricing.microUsdc;
+      const usdFormatted = `$${(parseInt(microUsdc, 10) / 1e6).toFixed(4)}`;
+      const token = body.pricing.token || (this.network.includes(":D") ? "USDC-350c4e" : "USDC-c76f1f");
+      const providerAgentNonce =
+        body.agentIdentity?.agentNonce ?? body.pricing.providerAgentNonce ?? 1;
+
+      const toolDef: McpToolDefinition = {
+        name: body.name,
+        description: body.description,
+        inputSchema: body.inputSchema,
+        pricing: {
+          microUsdc,
+          usdFormatted,
+          token,
+          serviceId: body.pricing.serviceId,
+          providerAgentNonce,
+        },
+        payTo: body.payTo,
+        reputationScore: 100,
+        totalCompletedJobs: 0,
+      };
+
+      // Register into registry adapter
+      this.registry.registerLocalTool(toolDef);
+
+      // If upstream endpointUrl provided, wire HTTP forwarding handler
+      if (body.endpointUrl) {
+        this.executor.registerHandler(body.name, async (args) => {
+          try {
+            const resp = await fetch(body.endpointUrl!, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ name: body.name, arguments: args }),
+            });
+            if (!resp.ok) {
+              const errText = await resp.text();
+              return {
+                content: [{ type: "text", text: `Upstream tool error (${resp.status}): ${errText}` }],
+                isError: true,
+              };
+            }
+            const data = (await resp.json()) as any;
+            return {
+              content: Array.isArray(data?.content)
+                ? data.content
+                : [{ type: "text", text: typeof data === "object" ? JSON.stringify(data) : String(data) }],
+              isError: Boolean(data?.isError),
+            };
+          } catch (err: unknown) {
+            const msg = err instanceof Error ? err.message : String(err);
+            return {
+              content: [{ type: "text", text: `Upstream connection failed: ${msg}` }],
+              isError: true,
+            };
+          }
+        });
+      }
+
+      this.registry.recordToolHeartbeat(body.name, 10, "healthy");
+
+      return res.status(201).json({
+        success: true,
+        message: `Tool '${body.name}' registered successfully`,
+        tool: toolDef,
+        payTo: body.payTo,
+        identityVerified,
+      });
+    });
+
+    // Tool Health Probe: List all tool statuses
+    this.app.get("/mcp/v1/tools/health", (_req: Request, res: Response) => {
+      const healthList = this.registry.getAllToolHealth();
+      res.json({
+        status: "ok",
+        count: healthList.length,
+        tools: healthList,
+      });
+    });
+
+    // Tool Health Probe: Single tool status
+    this.app.get("/mcp/v1/tools/:name/health", (req: Request, res: Response) => {
+      const health = this.registry.getToolHealth(req.params.name);
+      if (!health) {
+        return res.status(404).json({ error: `Tool '${req.params.name}' not found` });
+      }
+      return res.json(health);
+    });
+
+    // Tool Heartbeat: Provider ping
+    this.app.post("/mcp/v1/tools/:name/heartbeat", (req: Request, res: Response) => {
+      const toolDef = this.registry.getLocalTool(req.params.name);
+      if (!toolDef) {
+        return res.status(404).json({ error: `Tool '${req.params.name}' not registered` });
+      }
+      const latencyMs = typeof req.body?.latencyMs === "number" ? req.body.latencyMs : 15;
+      const status = req.body?.status === "degraded" || req.body?.status === "unreachable" ? req.body.status : "healthy";
+      const health = this.registry.recordToolHeartbeat(req.params.name, latencyMs, status);
+      return res.json({ success: true, health });
+    });
+
     // Server-Sent Events stream
     this.app.get("/mcp/v1/sse", (req: Request, res: Response) => {
       res.setHeader("Content-Type", "text/event-stream");
@@ -118,12 +284,14 @@ export class McpGateway {
       const { merchantAddress, shard: clientShard } =
         this.merchantPool.getMerchantAddressForUser(clientAddress);
 
+      const targetPayTo = toolDef.payTo || merchantAddress;
+
       const requirements: PaymentRequirements = {
         scheme: "exact",
         network: this.network as any,
         amount: toolDef.pricing.microUsdc,
         asset: toolDef.pricing.token,
-        payTo: merchantAddress as any,
+        payTo: targetPayTo as any,
         maxTimeoutSeconds: 300,
         extra: {
           shard: clientShard,
@@ -167,7 +335,10 @@ export class McpGateway {
 
       // Payment verified! Execute tool
       const toolArgs = (rpcReq.params?.arguments as Record<string, unknown>) ?? {};
+      const startExec = Date.now();
       const executionResult = await this.executor.executeTool(toolName, toolArgs);
+      const durationMs = Date.now() - startExec;
+      this.registry.recordToolExecution(toolName, !executionResult.isError, durationMs);
 
       const jobId = `job-mcp-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
       let proofResult: unknown;
@@ -364,6 +535,60 @@ export class McpGateway {
         const message = err instanceof Error ? err.message : String(err);
         return res.status(500).json({ error: `Failed to submit reputation feedback: ${message}` });
       }
+    });
+
+    // OpenAPI & Swagger Interactive Documentation
+    this.app.get("/openapi.json", (_req: Request, res: Response) => {
+      res.json({
+        openapi: "3.0.3",
+        info: {
+          title: "MultiversX x402 MCP Gateway API",
+          version: "1.0.0",
+          description: "Decentralized Model Context Protocol (MCP) tool marketplace and execution gateway on MultiversX Devnet",
+          contact: { name: "Robert Sasu", email: "sasu.robert@gmail.com" },
+        },
+        servers: [{ url: "/", description: "Current MCP Gateway instance" }],
+        paths: {
+          "/health": { get: { summary: "Health check probe", responses: { "200": { description: "Service is healthy" } } } },
+          "/mcp/v1/tools": { get: { summary: "List available MCP tools with pricing", responses: { "200": { description: "List of tools" } } } },
+          "/mcp/v1/tools/register": { post: { summary: "Register new MCP tool with on-chain pricing and payTo", responses: { "201": { description: "Tool registered" } } } },
+          "/mcp/v1/tools/call": { post: { summary: "Invoke an MCP tool with x402 micropayment", responses: { "200": { description: "Tool result" }, "402": { description: "Payment Required" } } } },
+          "/mcp/v1/tools/health": { get: { summary: "Tool health status list", responses: { "200": { description: "All tool statuses" } } } },
+        },
+      });
+    });
+
+    this.app.get(["/docs", "/swagger"], (_req: Request, res: Response) => {
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>x402 MCP Gateway - Interactive API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .topbar { display: none; }
+    .swagger-ui { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>`;
+      res.type("html").send(html);
     });
   }
 

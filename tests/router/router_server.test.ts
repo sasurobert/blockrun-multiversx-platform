@@ -186,4 +186,18 @@ describe("ClawRouterServer (TDD)", () => {
     expect(res.status).toBe(502);
     expect(mockReportFailure).toHaveBeenCalled();
   });
+
+  it("should serve interactive API documentation at /docs and /openapi.json", async () => {
+    const docsRes = await request(routerServer.app).get("/docs");
+    expect(docsRes.status).toBe(200);
+    expect(docsRes.text).toContain("SwaggerUIBundle");
+
+    const swaggerRes = await request(routerServer.app).get("/swagger");
+    expect(swaggerRes.status).toBe(200);
+
+    const openapiRes = await request(routerServer.app).get("/openapi.json");
+    expect(openapiRes.status).toBe(200);
+    expect(openapiRes.body.openapi).toBe("3.0.3");
+    expect(openapiRes.body.info.title).toContain("ClawRouter");
+  });
 });

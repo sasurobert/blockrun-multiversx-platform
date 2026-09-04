@@ -1,4 +1,5 @@
 import { ArbitrageMatrix } from "./arbitrage_matrix.js";
+import { ReputationClient } from "../services/reputation_client.js";
 
 export type ValidationResponseFn = (
   requestHash: string,
@@ -11,6 +12,8 @@ export interface SlaSlasherOptions {
   maxAllowedTtftMs?: number;
   consecutiveFailureLimit?: number;
   validationResponseFn?: ValidationResponseFn;
+  reputationClient?: ReputationClient;
+  providerAgentNonceMap?: Map<string, number> | Record<string, number>;
 }
 
 export class SlaSlasher {
@@ -18,6 +21,8 @@ export class SlaSlasher {
   private maxAllowedTtftMs: number;
   private consecutiveFailureLimit: number;
   private validationResponseFn?: ValidationResponseFn;
+  private reputationClient?: ReputationClient;
+  private providerAgentNonceMap = new Map<string, number>();
   private failureCounts = new Map<string, number>();
 
   constructor(options: SlaSlasherOptions) {
@@ -25,6 +30,42 @@ export class SlaSlasher {
     this.maxAllowedTtftMs = options.maxAllowedTtftMs ?? 1500;
     this.consecutiveFailureLimit = options.consecutiveFailureLimit ?? 3;
     this.validationResponseFn = options.validationResponseFn;
+    this.reputationClient = options.reputationClient;
+    if (options.providerAgentNonceMap) {
+      if (options.providerAgentNonceMap instanceof Map) {
+        this.providerAgentNonceMap = options.providerAgentNonceMap;
+      } else {
+        for (const [k, v] of Object.entries(options.providerAgentNonceMap)) {
+          this.providerAgentNonceMap.set(k, v);
+        }
+      }
+    }
+  }
+
+  private async executeSlash(providerId: string, requestHash: string): Promise<string> {
+    let slashResult: string | undefined;
+
+    // 1. Slash on-chain via ValidationRegistry if callback provided
+    if (this.validationResponseFn) {
+      slashResult = await this.validationResponseFn(requestHash, 0, "SLA_BREACH");
+    }
+
+    // 2. Slash on-chain via Devnet ReputationRegistry feedback
+    if (this.reputationClient) {
+      const agentNonce = this.providerAgentNonceMap.get(providerId);
+      if (agentNonce !== undefined) {
+        const feedbackTx = await this.reputationClient.giveFeedbackSimple(
+          requestHash,
+          agentNonce,
+          1 // Lowest possible rating (1/100) indicating critical SLA failure
+        );
+        if (!slashResult) {
+          slashResult = feedbackTx;
+        }
+      }
+    }
+
+    return slashResult ?? `mock-slash-${Date.now()}`;
   }
 
   public async reportTtft(
@@ -34,13 +75,11 @@ export class SlaSlasher {
   ): Promise<string | undefined> {
     if (ttftMs > this.maxAllowedTtftMs) {
       this.matrix.updateHealth(providerId, false, ttftMs);
-
-      if (this.validationResponseFn) {
-        return await this.validationResponseFn(requestHash, 0, "SLA_BREACH");
-      }
-      return `mock-slash-${Date.now()}`;
+      return await this.executeSlash(providerId, requestHash);
     }
 
+    // Reset consecutive failure count on healthy response within SLA limit
+    this.failureCounts.delete(providerId);
     this.matrix.updateHealth(providerId, true, ttftMs);
     return undefined;
   }
@@ -55,13 +94,10 @@ export class SlaSlasher {
     if (current >= this.consecutiveFailureLimit) {
       this.matrix.updateHealth(providerId, false);
       this.failureCounts.delete(providerId);
-
-      if (this.validationResponseFn) {
-        return await this.validationResponseFn(requestHash, 0, "SLA_BREACH");
-      }
-      return `mock-slash-${Date.now()}`;
+      return await this.executeSlash(providerId, requestHash);
     }
 
     return undefined;
   }
 }
+

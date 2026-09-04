@@ -17,6 +17,7 @@ export const McpToolDefinitionSchema = z.object({
   description: z.string(),
   inputSchema: z.record(z.unknown()),
   pricing: McpPricingConfigSchema,
+  payTo: z.string().optional(),
   reputationScore: z.number().min(0).max(100).optional(),
   totalCompletedJobs: z.number().int().nonnegative().optional(),
 });
@@ -71,3 +72,37 @@ export const McpToolsListResponseSchema = z.object({
 });
 
 export type McpToolsListResponse = z.infer<typeof McpToolsListResponseSchema>;
+
+export const McpToolRegisterRequestSchema = z.object({
+  name: z.string().min(1, "Tool name is required"),
+  description: z.string().min(1, "Description is required"),
+  inputSchema: z.record(z.unknown()).default({}),
+  pricing: z.object({
+    microUsdc: z.string().regex(/^\d+$/, "microUsdc must be an integer string"),
+    token: z.string().default("USDC-350c4e"),
+    serviceId: z.number().int().nonnegative().default(1),
+    providerAgentNonce: z.number().int().nonnegative().default(1),
+  }),
+  payTo: z.string().min(1, "payTo address is required"),
+  agentIdentity: z
+    .object({
+      agentNonce: z.number().int().nonnegative(),
+      ownerAddress: z.string().optional(),
+      signature: z.string().optional(),
+      proof: z.string().optional(),
+    })
+    .optional(),
+  endpointUrl: z.string().url().optional(),
+});
+
+export type McpToolRegisterRequest = z.infer<typeof McpToolRegisterRequestSchema>;
+
+export interface ToolHealthStatus {
+  name: string;
+  status: "healthy" | "degraded" | "unreachable";
+  latencyMs: number;
+  lastHeartbeat: number;
+  callCount: number;
+  errorCount: number;
+  uptimePct: number;
+}

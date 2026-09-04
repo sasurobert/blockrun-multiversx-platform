@@ -167,4 +167,55 @@ describe("TollboothServer (TDD)", () => {
     expect(res.body.error).toContain("Payment verification failed");
     expect(mockRecordFailure).toHaveBeenCalledWith(expect.any(String), 99);
   });
+
+  it("should serve dynamic /robots.txt advertising x402 payment scheme", async () => {
+    const res = await request(tollbooth.app).get("/robots.txt");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.text).toContain("X402-Payment-Required: true");
+    expect(res.text).toContain("X402-Network: multiversx:1");
+    expect(res.text).toContain("X402-Rate: 1500 micro-USDC");
+  });
+
+  it("should serve dynamic /ai.txt adhering to AI crawler permission standard", async () => {
+    const res = await request(tollbooth.app).get("/ai.txt");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toContain("text/plain");
+    expect(res.text).toContain("User-agent: GPTBot");
+    expect(res.text).toContain("Permission: allowed-with-payment");
+    expect(res.text).toContain("Payment-Protocol: x402-v2");
+    expect(res.text).toContain("Payment-Rate: 1500 micro-USDC");
+  });
+
+  it("should reject spoofed bot crawlers with 403 Forbidden", async () => {
+    // A non-OpenAI public IP claims to be GPTBot
+    const res = await request(tollbooth.app)
+      .get("/docs/article-1")
+      .set("user-agent", "GPTBot/1.2")
+      .set("x-forwarded-for", "185.220.101.5"); // Tor exit node / spoofed IP
+
+    expect(res.status).toBe(403);
+    expect(res.body.error).toContain("Spoofed bot identity detected");
+    expect(res.body.verificationStatus).toBe("spoofed");
+  });
+
+  it("should serve interactive API documentation at /docs and /openapi.json", async () => {
+    const docsRes = await request(tollbooth.app).get("/docs");
+    expect(docsRes.status).toBe(200);
+    expect(docsRes.text).toContain("SwaggerUIBundle");
+
+    const openapiRes = await request(tollbooth.app).get("/openapi.json");
+    expect(openapiRes.status).toBe(200);
+    expect(openapiRes.body.openapi).toBe("3.0.3");
+  });
+
+  it("should serve monetization telemetry on both /stats and /analytics", async () => {
+    const statsRes = await request(tollbooth.app).get("/stats");
+    expect(statsRes.status).toBe(200);
+    expect(statsRes.body.totalRequests).toBeDefined();
+
+    const analyticsRes = await request(tollbooth.app).get("/analytics");
+    expect(analyticsRes.status).toBe(200);
+    expect(analyticsRes.body.revenueMicroUsdc).toBe(statsRes.body.revenueMicroUsdc);
+  });
 });

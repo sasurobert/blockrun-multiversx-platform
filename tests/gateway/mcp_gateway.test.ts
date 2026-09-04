@@ -308,4 +308,164 @@ describe("McpGateway (TDD)", () => {
       expect(res.body.error).toContain("Rating must be an integer between 1 and 100");
     });
   });
+
+  describe("Dynamic Tool Registry & Health Probes", () => {
+    const validPayTo = "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k";
+    const validOwner = "erd1ka0yrspygvjtktyzxu58ufn0kujkqgx4gq2ch5ev2aqjcem9jcqqkntrmv";
+
+    it("should dynamically register a new tool with pricing and MX-8004 identity", async () => {
+      const toolPayload = {
+        name: "dynamic-calculator",
+        description: "High speed compute oracle",
+        inputSchema: { type: "object" },
+        pricing: {
+          microUsdc: "12500",
+          token: "USDC-350c4e",
+          serviceId: 5,
+          providerAgentNonce: 88,
+        },
+        payTo: validPayTo,
+        agentIdentity: {
+          agentNonce: 88,
+          ownerAddress: validOwner,
+        },
+      };
+
+      const res = await request(gateway.app)
+        .post("/mcp/v1/tools/register")
+        .send(toolPayload);
+
+      expect(res.status).toBe(201);
+      expect(res.body.success).toBe(true);
+      expect(res.body.tool.name).toBe("dynamic-calculator");
+      expect(res.body.tool.pricing.microUsdc).toBe("12500");
+      expect(res.body.identityVerified).toBe(true);
+
+      // Verify discovery list
+      const listRes = await request(gateway.app).get("/mcp/v1/tools");
+      expect(listRes.status).toBe(200);
+      const found = listRes.body.tools.find((t: any) => t.name === "dynamic-calculator");
+      expect(found).toBeDefined();
+    });
+
+    it("should reject invalid payTo or invalid agentIdentity", async () => {
+      const resBadPayTo = await request(gateway.app)
+        .post("/mcp/v1/tools/register")
+        .send({
+          name: "bad-tool",
+          description: "desc",
+          pricing: { microUsdc: "1000" },
+          payTo: "bad-address",
+        });
+      expect(resBadPayTo.status).toBe(400);
+
+      // Address has 62 chars and starts with erd1, but invalid bech32 checksum
+      const resBadChecksum = await request(gateway.app)
+        .post("/mcp/v1/tools/register")
+        .send({
+          name: "bad-checksum-tool",
+          description: "desc",
+          pricing: { microUsdc: "1000" },
+          payTo: "erd1" + "a".repeat(58),
+        });
+      expect(resBadChecksum.status).toBe(400);
+      expect(resBadChecksum.body.error).toContain("Invalid payTo address");
+
+      const resBadIdentity = await request(gateway.app)
+        .post("/mcp/v1/tools/register")
+        .send({
+          name: "bad-tool-2",
+          description: "desc",
+          pricing: { microUsdc: "1000" },
+          payTo: validPayTo,
+          agentIdentity: { agentNonce: -1 },
+        });
+      expect(resBadIdentity.status).toBe(400);
+    });
+
+    it("should return health status list and single tool health", async () => {
+      const resAll = await request(gateway.app).get("/mcp/v1/tools/health");
+      expect(resAll.status).toBe(200);
+      expect(resAll.body.status).toBe("ok");
+      expect(Array.isArray(resAll.body.tools)).toBe(true);
+
+      const resSingle = await request(gateway.app).get("/mcp/v1/tools/multiversx-analyzer/health");
+      expect(resSingle.status).toBe(200);
+      expect(resSingle.body.name).toBe("multiversx-analyzer");
+      expect(resSingle.body.status).toBe("healthy");
+
+      const res404 = await request(gateway.app).get("/mcp/v1/tools/missing-tool/health");
+      expect(res404.status).toBe(404);
+    });
+
+    it("should record tool heartbeat and update status", async () => {
+      const res = await request(gateway.app)
+        .post("/mcp/v1/tools/multiversx-analyzer/heartbeat")
+        .send({ latencyMs: 22, status: "healthy" });
+
+      expect(res.status).toBe(200);
+      expect(res.body.success).toBe(true);
+      expect(res.body.health.latencyMs).toBe(22);
+    });
+
+    it("should route 402 payment requirements to the tool's registered payTo address", async () => {
+      const toolPayload = {
+        name: "custom-payto-tool",
+        description: "Tool with custom merchant address",
+        pricing: {
+          microUsdc: "7500",
+          token: "USDC-350c4e",
+        },
+        payTo: validPayTo,
+      };
+
+      await request(gateway.app).post("/mcp/v1/tools/register").send(toolPayload);
+
+      // Invoke tool without payment to get 402 challenge
+      const callRes = await request(gateway.app)
+        .post("/mcp/v1/tools/call")
+        .send({
+          jsonrpc: "2.0",
+          id: 1,
+          method: "tools/call",
+          params: { name: "custom-payto-tool", arguments: {} },
+        });
+
+      expect(callRes.status).toBe(402);
+      expect(callRes.body.accepts[0].payTo).toBe(validPayTo);
+      expect(callRes.body.accepts[0].amount).toBe("7500");
+    });
+
+    it("should reject forged or invalid MX-8004 agentIdentity cryptographic signature", async () => {
+      const res = await request(gateway.app)
+        .post("/mcp/v1/tools/register")
+        .send({
+          name: "forged-tool",
+          description: "desc",
+          pricing: { microUsdc: "5000" },
+          payTo: validPayTo,
+          agentIdentity: {
+            agentNonce: 1,
+            ownerAddress: validOwner,
+            signature: "00".repeat(64), // Invalid forged signature
+          },
+        });
+
+      expect([400, 401]).toContain(res.status);
+    });
+
+    it("should serve interactive API documentation at /docs and /openapi.json", async () => {
+      const docsRes = await request(gateway.app).get("/docs");
+      expect(docsRes.status).toBe(200);
+      expect(docsRes.text).toContain("SwaggerUIBundle");
+
+      const swaggerRes = await request(gateway.app).get("/swagger");
+      expect(swaggerRes.status).toBe(200);
+
+      const openapiRes = await request(gateway.app).get("/openapi.json");
+      expect(openapiRes.status).toBe(200);
+      expect(openapiRes.body.openapi).toBe("3.0.3");
+      expect(openapiRes.body.info.title).toContain("MCP Gateway");
+    });
+  });
 });

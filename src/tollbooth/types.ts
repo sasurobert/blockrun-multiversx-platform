@@ -3,6 +3,9 @@ export interface BotClassificationResult {
   botName?: string;
   preferredContentType: "text/markdown" | "application/json" | "text/html";
   agentIdentity?: number;
+  isSpoofed?: boolean;
+  verificationStatus?: "verified" | "spoofed" | "unverified" | "unknown";
+  clientIp?: string;
 }
 
 export interface TollPricingOptions {

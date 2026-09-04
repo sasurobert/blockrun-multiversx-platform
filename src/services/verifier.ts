@@ -8,6 +8,7 @@ import {
 } from "../domain/types.js";
 import { INetworkProvider } from "../domain/network.js";
 import { RelayerPoolManager } from "./relayer_pool.js";
+import { getSignerBech32 } from "./key_signer.js";
 import { extractChainID, parseTransactionTransfers } from "../utils/data_parser.js";
 
 /**
@@ -306,7 +307,7 @@ export class VerifierService implements IVerifierService {
         const userShard = this.relayerPool.getShardForAddress(txPayload.sender);
         const shardRelayers = this.relayerPool.getAllRelayersForShard(userShard);
         const isRelayerInShard = shardRelayers.some(
-          (s) => s.getAddress().bech32() === txPayload.relayer
+          (s) => getSignerBech32(s) === txPayload.relayer
         );
 
         if (!isRelayerInShard) {
@@ -355,7 +356,7 @@ export class VerifierService implements IVerifierService {
           try {
             const relayerSigner = this.relayerPool.getRelayerForAddress(txPayload.sender);
             const bytesToSign = this.transactionComputer.computeBytesForSigning(tx);
-            const relayerSig = await relayerSigner.sign(bytesToSign);
+            const relayerSig = await relayerSigner.sign(Buffer.from(bytesToSign));
             txToSimulate = new Transaction({
               nonce: tx.nonce,
               value: tx.value,

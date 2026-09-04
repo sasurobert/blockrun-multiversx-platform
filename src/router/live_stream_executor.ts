@@ -80,7 +80,11 @@ export function createLiveStreamExecutor(options?: {
           model: request.model,
           messages: request.messages,
           max_tokens: request.max_tokens,
+          temperature: request.temperature,
           stream: true,
+          ...(request.tools ? { tools: request.tools } : {}),
+          ...(request.tool_choice ? { tool_choice: request.tool_choice } : {}),
+          ...(request.response_format ? { response_format: request.response_format } : {}),
         }),
         signal,
       });

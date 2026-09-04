@@ -1,0 +1,49 @@
+{
+  "name": "@sasurobert/multiversx-x402",
+  "version": "1.0.0",
+  "description": "MultiversX x402 Client SDK for autonomous agent payments, MCP tools, and AI scrapers on Devnet",
+  "author": "Robert Sasu <sasu.robert@gmail.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "browser": {
+    "fs": false,
+    "node:fs": false
+  },
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "browser": "./dist/index.js",
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@multiversx/sdk-core": "^15.0.0",
+    "@multiversx/sdk-network-providers": "^2.9.3",
+    "@multiversx/sdk-wallet": "^4.6.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.4.5"
+  },
+  "keywords": [
+    "multiversx",
+    "x402",
+    "micropayments",
+    "ai-agents",
+    "mcp",
+    "devnet",
+    "usdc",
+    "tollbooth",
+    "gasless"
+  ]
+}

@@ -5,6 +5,7 @@ import { SettleRequest, SettleResponse, PaymentErrorCode, MvxTransactionPayload 
 import { ISettlementStorage } from "../storage/types.js";
 import { PipelinedRelayerPool } from "./pipelined_relayer_pool.js";
 import { BatchNetworkProvider } from "./batch_network_provider.js";
+import { getSignerBech32 } from "./key_signer.js";
 
 export interface PipelinedSettlementQueueConfig {
   relayerPool: PipelinedRelayerPool;
@@ -112,7 +113,7 @@ export class PipelinedSettlementQueue {
     const senderAddr = this.getOrParseAddress(payload.sender);
     const shard = this.relayerPool.getShardForAddress(senderAddr);
     const relayerSigner = this.relayerPool.getNextRelayerForShard(shard);
-    const relayerAddress = relayerSigner.getAddress().bech32();
+    const relayerAddress = getSignerBech32(relayerSigner);
 
     const relayerNonce = this.relayerPool.reserveNonce(relayerAddress);
 
@@ -139,7 +140,7 @@ export class PipelinedSettlementQueue {
         relayer: this.getOrParseAddress(relayerAddress),
       });
       const bytesForRelayer = this.transactionComputer.computeBytesForSigning(tx);
-      const relayerSignature = await relayerSigner.sign(bytesForRelayer);
+      const relayerSignature = await relayerSigner.sign(Buffer.from(bytesForRelayer));
       tx.relayerSignature = relayerSignature;
     }
 

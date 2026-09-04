@@ -1,4 +1,4 @@
-import { McpToolDefinition } from "../domain/mcp_types.js";
+import { McpToolDefinition, ToolHealthStatus } from "../domain/mcp_types.js";
 
 export interface AgentServicePricing {
   token: string;
@@ -28,6 +28,7 @@ export class McpRegistryAdapter {
   private cacheTtlMs: number;
   private cache = new Map<string, CacheEntry>();
   private localTools = new Map<string, McpToolDefinition>();
+  private toolHealth = new Map<string, ToolHealthStatus>();
 
   constructor(options: McpRegistryAdapterOptions = {}) {
     this.identityContractAddress = options.identityContractAddress;
@@ -62,6 +63,17 @@ export class McpRegistryAdapter {
 
   public registerLocalTool(tool: McpToolDefinition): void {
     this.localTools.set(tool.name, tool);
+    if (!this.toolHealth.has(tool.name)) {
+      this.toolHealth.set(tool.name, {
+        name: tool.name,
+        status: "healthy",
+        latencyMs: 15,
+        lastHeartbeat: Date.now(),
+        callCount: 0,
+        errorCount: 0,
+        uptimePct: 100.0,
+      });
+    }
   }
 
   public getLocalTool(name: string): McpToolDefinition | undefined {
@@ -70,6 +82,60 @@ export class McpRegistryAdapter {
 
   public listLocalTools(): McpToolDefinition[] {
     return Array.from(this.localTools.values());
+  }
+
+  public recordToolHeartbeat(
+    name: string,
+    latencyMs: number = 20,
+    status: "healthy" | "degraded" | "unreachable" = "healthy"
+  ): ToolHealthStatus {
+    let health = this.toolHealth.get(name);
+    if (!health) {
+      health = {
+        name,
+        status,
+        latencyMs,
+        lastHeartbeat: Date.now(),
+        callCount: 0,
+        errorCount: 0,
+        uptimePct: 100.0,
+      };
+      this.toolHealth.set(name, health);
+    } else {
+      health.lastHeartbeat = Date.now();
+      health.latencyMs = latencyMs;
+      health.status = status;
+    }
+    return health;
+  }
+
+  public recordToolExecution(name: string, success: boolean, durationMs: number): void {
+    let health = this.toolHealth.get(name);
+    if (!health) {
+      health = this.recordToolHeartbeat(name, durationMs);
+    }
+    health.callCount++;
+    if (!success) {
+      health.errorCount++;
+    }
+    health.latencyMs = Math.round(health.latencyMs * 0.7 + durationMs * 0.3);
+    const errorRate = health.errorCount / Math.max(1, health.callCount);
+    health.uptimePct = Math.max(0, Math.round((1 - errorRate) * 1000) / 10);
+    if (errorRate > 0.5) {
+      health.status = "unreachable";
+    } else if (errorRate > 0.1 || health.latencyMs > 2000) {
+      health.status = "degraded";
+    } else {
+      health.status = "healthy";
+    }
+  }
+
+  public getToolHealth(name: string): ToolHealthStatus | undefined {
+    return this.toolHealth.get(name);
+  }
+
+  public getAllToolHealth(): ToolHealthStatus[] {
+    return Array.from(this.toolHealth.values());
   }
 
   public clearCache(): void {

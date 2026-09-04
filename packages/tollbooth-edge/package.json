@@ -1,0 +1,33 @@
+{
+  "name": "@sasurobert/tollbooth-edge",
+  "version": "1.0.0",
+  "description": "Drop-in Edge & Cloudflare Worker middleware for MultiversX x402 AI Scraper Tollbooth",
+  "author": "Robert Sasu <sasu.robert@gmail.com>",
+  "license": "MIT",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "scripts": {
+    "build": "tsc"
+  },
+  "keywords": [
+    "multiversx",
+    "x402",
+    "tollbooth",
+    "cloudflare-workers",
+    "edge-middleware",
+    "anti-bot",
+    "ai-monetization",
+    "usdc"
+  ]
+}

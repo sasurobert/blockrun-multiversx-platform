@@ -394,7 +394,7 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
     });
   });
 
-  describe("GET /openapi.json", () => {
+  describe("GET /openapi.json and Interactive Docs", () => {
     it("should return valid OpenAPI 3.1.0 document with all facilitator endpoints", async () => {
       const res = await request(server).get("/openapi.json");
       expect(res.status).toBe(200);
@@ -410,6 +410,19 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
       expect(res.body.paths["/relayer/address/{userAddress}"]).toBeDefined();
       expect(res.body.paths["/relayer/shards"]).toBeDefined();
       expect(res.body.components?.schemas).toBeDefined();
+    });
+
+    it("should serve interactive documentation HTML on /docs and /swagger", async () => {
+      const docsRes = await request(server).get("/docs");
+      expect(docsRes.status).toBe(200);
+      expect(docsRes.headers["content-type"]).toContain("text/html");
+      expect(docsRes.text).toContain("swagger-ui");
+      expect(docsRes.text).toContain("/openapi.json");
+
+      const swaggerRes = await request(server).get("/swagger");
+      expect(swaggerRes.status).toBe(200);
+      expect(swaggerRes.headers["content-type"]).toContain("text/html");
+      expect(swaggerRes.text).toContain("swagger-ui");
     });
   });
 
@@ -435,20 +448,25 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
         settlementQueue,
         rateLimit: { enabled: false },
       });
-      const res = await request(malformedApp)
-        .post("/verify")
-        .set("Content-Type", "application/json")
-        .set("Connection", "close")
-        .send("{ malformed-json-payload ");
+      const malformedServer = malformedApp.listen(0, "127.0.0.1");
+      try {
+        const res = await request(malformedServer)
+          .post("/verify")
+          .set("Content-Type", "application/json")
+          .set("Connection", "close")
+          .send("{ malformed-json-payload ");
 
-      expect(res.status).toBe(400);
-      const parsed =
-        res.body && typeof res.body === "object" && res.body.error
-          ? res.body
-          : res.text && res.text.trim().startsWith("{")
-            ? JSON.parse(res.text)
-            : { error: res.text };
-      expect(parsed.error).toBeDefined();
+        expect(res.status).toBe(400);
+        const parsed =
+          res.body && typeof res.body === "object" && res.body.error
+            ? res.body
+            : res.text && res.text.trim().startsWith("{")
+              ? JSON.parse(res.text)
+              : { error: res.text };
+        expect(parsed.error).toBeDefined();
+      } finally {
+        await new Promise<void>((r) => malformedServer.close(() => r()));
+      }
     });
 
     it("should rate limit requests when configured and limit is exceeded", async () => {
@@ -457,20 +475,19 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
         settlementQueue,
         rateLimit: { windowMs: 10000, max: 2, enabled: true },
       });
-
-      const server = rateLimitedApp.listen(0);
+      const rateLimitedServer = rateLimitedApp.listen(0, "127.0.0.1");
       try {
-        const res1 = await request(server).get("/health");
+        const res1 = await request(rateLimitedServer).get("/health");
         expect(res1.status).toBe(200);
 
-        const res2 = await request(server).get("/health");
+        const res2 = await request(rateLimitedServer).get("/health");
         expect(res2.status).toBe(200);
 
-        const res3 = await request(server).get("/health");
+        const res3 = await request(rateLimitedServer).get("/health");
         expect(res3.status).toBe(429);
         expect(res3.body.error).toContain("Too many requests");
       } finally {
-        await new Promise<void>((resolve) => server.close(() => resolve()));
+        await new Promise<void>((r) => rateLimitedServer.close(() => r()));
       }
     });
 
@@ -480,7 +497,6 @@ describe("Facilitator HTTP Server (x402 v2 Endpoints & OpenAPI)", () => {
         settlementQueue,
         rateLimit: { enabled: false },
       });
-
       const noRelayerServer = noRelayerApp.listen(0, "127.0.0.1");
       try {
         const resShards = await request(noRelayerServer).get("/relayer/shards");

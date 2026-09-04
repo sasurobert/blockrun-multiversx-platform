@@ -1,6 +1,7 @@
 {
   "name": "blockrun-multiversx-gateway",
   "version": "1.0.0",
+  "author": "Robert Sasu <sasu.robert@gmail.com>",
   "type": "module",
   "description": "x402 v2 Payment Gateway and Facilitator for MultiversX",
   "main": "dist/index.js",
@@ -33,7 +34,7 @@
     "webui:dev": "npm --prefix webui run dev",
     "webui:build": "npm --prefix webui run build",
     "test": "vitest run",
-    "test:python": "PYTHONPATH=./python python3 -m unittest discover -s python/tests",
+    "test:python": "PYTHONPATH=./python uv run --with pynacl python -m unittest discover -s python/tests 2>/dev/null || PYTHONPATH=./python python3 -m unittest discover -s python/tests",
     "test:all": "npm test && npm run test:python",
     "test:watch": "vitest"
   },

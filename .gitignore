@@ -38,3 +38,9 @@ coverage/
 *.pem
 wallets/
 keys/
+
+# Python cache
+__pycache__/
+*.py[cod]
+*$py.class
+

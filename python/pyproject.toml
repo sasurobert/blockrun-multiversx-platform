@@ -3,11 +3,11 @@ requires = ["setuptools>=61.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "blockrun-mvx"
+name = "multiversx-x402"
 version = "1.0.0"
-description = "MultiversX Autonomous AI Agent Client SDK for BlockRun AI Gateway"
+description = "MultiversX Autonomous AI Agent Client SDK for x402 Micropayments, Tollbooth, and MCP on Devnet"
 readme = "README.md"
-authors = [{ name = "MultiversX AI Foundation" }]
+authors = [{ name = "Robert Sasu", email = "sasu.robert@gmail.com" }]
 license = { text = "MIT" }
 requires-python = ">=3.9"
 dependencies = [
@@ -18,3 +18,4 @@ dependencies = [
 dev = [
     "pytest>=7.0.0",
 ]
+

@@ -46,7 +46,9 @@ describe("Tollbooth Stress Test & Throughput Benchmark", () => {
       originFetch: mockOriginFetch,
     });
 
-    const server = tollbooth.app.listen(0);
+    const server = await new Promise<any>((resolve) => {
+      const s = tollbooth.app.listen(0, "127.0.0.1", () => resolve(s));
+    });
     const port = (server.address() as any).port;
 
     const dummySig = Buffer.from(
@@ -85,7 +87,7 @@ describe("Tollbooth Stress Test & Throughput Benchmark", () => {
       console.log(`Tollbooth Stress Test: ${totalRequests} pages converted in ${duration}ms (${pagesPerSec} pages/sec)`);
       expect(duration).toBeLessThan(10000);
     } finally {
-      server.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

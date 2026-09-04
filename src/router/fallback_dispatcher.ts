@@ -11,6 +11,15 @@ export interface CascadingFallbackDispatcherOptions {
   streamExecutor?: StreamExecutorFn;
 }
 
+function getCommonPrefixLength(a: string, b: string): number {
+  let i = 0;
+  const max = Math.min(a.length, b.length);
+  while (i < max && a[i] === b[i]) {
+    i++;
+  }
+  return i;
+}
+
 export class CascadingFallbackDispatcher {
   private fallbackTimeoutMs: number;
   private streamExecutor?: StreamExecutorFn;
@@ -29,20 +38,19 @@ export class CascadingFallbackDispatcher {
     }
 
     let lastError: Error | null = null;
+    const executor =
+      this.streamExecutor ??
+      (async function* (p: ProviderSpec) {
+        yield `Response from ${p.name} for ${request.model}`;
+      });
 
     for (let i = 0; i < providers.length; i++) {
-      const provider = providers[i];
+      const primaryProvider = providers[i];
       const isFallback = i > 0;
       const abortController = new AbortController();
 
       try {
-        const executor =
-          this.streamExecutor ??
-          (async function* (p: ProviderSpec) {
-            yield `Response from ${p.name} for ${request.model}`;
-          });
-
-        const streamGen = executor(provider, request, abortController.signal);
+        const streamGen = executor(primaryProvider, request, abortController.signal);
 
         // Probe TTFT with timeout
         const start = Date.now();
@@ -64,24 +72,93 @@ export class CascadingFallbackDispatcher {
         }
 
         const firstValue = firstResult.value;
+        const remainingProviders = providers.slice(i + 1);
 
-        // Wrap generator to include the first already-fetched chunk
-        async function* wrappedStream() {
+        // Token Streaming Buffer for seamless mid-stream fallback without duplicate tokens
+        async function* wrappedBufferedStream(): AsyncIterable<string> {
+          let emittedText = "";
+          let currentIterator = iterator;
+          let currentAbort = abortController;
+          let fallbackIdx = 0;
+          let fallbackAccumulated = "";
+          let prefixTrimmed = true;
+
           if (firstValue !== undefined) {
+            emittedText += firstValue;
             yield firstValue;
           }
+
           while (true) {
-            const next = await iterator.next();
-            if (next.done) break;
-            yield next.value;
+            let next: IteratorResult<string, any>;
+            try {
+              next = await currentIterator.next();
+            } catch (streamErr: unknown) {
+              // Provider failed or stalled mid-stream!
+              currentAbort.abort();
+
+              if (fallbackIdx >= remainingProviders.length) {
+                // No more fallback providers available
+                throw streamErr;
+              }
+
+              // Engage next fallback provider in cascading chain
+              const fallbackProvider = remainingProviders[fallbackIdx++];
+              const fallbackAbort = new AbortController();
+              currentAbort = fallbackAbort;
+
+              const fallbackGen = executor(fallbackProvider, request, fallbackAbort.signal);
+              currentIterator = fallbackGen[Symbol.asyncIterator]();
+              fallbackAccumulated = "";
+              prefixTrimmed = false;
+              continue;
+            }
+
+            if (next.done) {
+              // If stream ended but prefix wasn't trimmed yet, flush divergent tail
+              if (!prefixTrimmed && fallbackAccumulated.length > 0) {
+                const overlapLen = getCommonPrefixLength(emittedText, fallbackAccumulated);
+                const delta = fallbackAccumulated.slice(overlapLen);
+                prefixTrimmed = true;
+                if (delta.length > 0) {
+                  emittedText += delta;
+                  yield delta;
+                }
+              }
+              break;
+            }
+
+            if (!prefixTrimmed) {
+              fallbackAccumulated += next.value;
+              if (fallbackAccumulated.length > emittedText.length) {
+                if (fallbackAccumulated.startsWith(emittedText)) {
+                  const newDelta = fallbackAccumulated.slice(emittedText.length);
+                  prefixTrimmed = true;
+                  emittedText = fallbackAccumulated;
+                  if (newDelta.length > 0) {
+                    yield newDelta;
+                  }
+                } else {
+                  const overlapLen = getCommonPrefixLength(emittedText, fallbackAccumulated);
+                  const delta = fallbackAccumulated.slice(overlapLen);
+                  prefixTrimmed = true;
+                  emittedText += delta;
+                  if (delta.length > 0) {
+                    yield delta;
+                  }
+                }
+              }
+            } else {
+              emittedText += next.value;
+              yield next.value;
+            }
           }
         }
 
         return {
-          providerId: provider.id,
+          providerId: primaryProvider.id,
           fallbackOccurred: isFallback,
           ttftMs,
-          stream: wrappedStream(),
+          stream: wrappedBufferedStream(),
         };
       } catch (err: unknown) {
         abortController.abort();

@@ -1,7 +1,10 @@
 import { Address, AddressComputer } from "@multiversx/sdk-core";
 import { Mnemonic, UserSigner } from "@multiversx/sdk-wallet";
+import { IKeySigner, getSignerBech32, getAddressBech32 } from "./key_signer.js";
 
 export const METACHAIN_SHARD_ID = 4294967295;
+
+export type RelayerSigner = IKeySigner | UserSigner;
 
 export interface PipelinedRelayerConfig {
   maxScanIndex?: number;
@@ -25,14 +28,14 @@ export interface RelayerNonceTracker {
  */
 export class PipelinedRelayerPool {
   private readonly addressComputer: AddressComputer;
-  private readonly shardRelayers: Map<number, UserSigner[]>;
+  private readonly shardRelayers: Map<number, RelayerSigner[]>;
   private readonly roundRobinIndex: Map<number, number>;
   private readonly nonceTrackers: Map<string, RelayerNonceTracker>;
   private readonly maxInFlightPerRelayer: number;
 
   constructor(options?: { maxInFlightPerRelayer?: number }) {
     this.addressComputer = new AddressComputer();
-    this.shardRelayers = new Map<number, UserSigner[]>();
+    this.shardRelayers = new Map<number, RelayerSigner[]>();
     this.roundRobinIndex = new Map<number, number>();
     this.nonceTrackers = new Map<string, RelayerNonceTracker>();
     this.maxInFlightPerRelayer = options?.maxInFlightPerRelayer ?? 250;
@@ -43,10 +46,10 @@ export class PipelinedRelayerPool {
     return this.addressComputer.getShardOfAddress(addr);
   }
 
-  registerRelayer(shard: number, signer: UserSigner, startingNonce: bigint = 0n): void {
+  registerRelayer(shard: number, signer: RelayerSigner, startingNonce: bigint = 0n): void {
     const list = this.shardRelayers.get(shard) || [];
-    const addr = signer.getAddress().bech32();
-    if (!list.some((s) => s.getAddress().bech32() === addr)) {
+    const addr = getSignerBech32(signer);
+    if (!list.some((s) => getSignerBech32(s) === addr)) {
       list.push(signer);
       this.shardRelayers.set(shard, list);
       if (!this.nonceTrackers.has(addr)) {
@@ -101,7 +104,7 @@ export class PipelinedRelayerPool {
     return this.getInFlightCount(address) < limit;
   }
 
-  getRelayerForShard(shard: number): UserSigner {
+  getRelayerForShard(shard: number): RelayerSigner {
     const list = this.shardRelayers.get(shard);
     if (!list || list.length === 0) {
       throw new Error(`No relayer registered for shard ${shard}`);
@@ -109,7 +112,7 @@ export class PipelinedRelayerPool {
     return list[0];
   }
 
-  getNextRelayerForShard(shard: number): UserSigner {
+  getNextRelayerForShard(shard: number): RelayerSigner {
     const list = this.shardRelayers.get(shard);
     if (!list || list.length === 0) {
       throw new Error(`No relayer registered for shard ${shard}`);
@@ -120,34 +123,25 @@ export class PipelinedRelayerPool {
     return signer;
   }
 
-  getAllRelayersForShard(shard: number): UserSigner[] {
+  getAllRelayersForShard(shard: number): RelayerSigner[] {
     return this.shardRelayers.get(shard) || [];
   }
 
-  getRelayerByAddress(address: string | Address): UserSigner | undefined {
-    const target =
-      typeof address === "string"
-        ? address
-        : typeof (address as any).toBech32 === "function"
-        ? (address as any).toBech32()
-        : typeof (address as any).bech32 === "function"
-        ? (address as any).bech32()
-        : String(address);
+  getRelayerByAddress(address: string | Address): RelayerSigner | undefined {
+    const target = getAddressBech32(address);
 
     for (const list of this.shardRelayers.values()) {
-      const match = list.find(
-        (s) => s.getAddress().bech32() === target || (s.getAddress() as any).toBech32?.() === target
-      );
+      const match = list.find((s) => getSignerBech32(s) === target);
       if (match) return match;
     }
     return undefined;
   }
 
-  getAllRelayers(): UserSigner[] {
-    const all: UserSigner[] = [];
+  getAllRelayers(): RelayerSigner[] {
+    const all: RelayerSigner[] = [];
     for (const list of this.shardRelayers.values()) {
       for (const s of list) {
-        if (!all.some((a) => a.getAddress().bech32() === s.getAddress().bech32())) {
+        if (!all.some((a) => getSignerBech32(a) === getSignerBech32(s))) {
           all.push(s);
         }
       }

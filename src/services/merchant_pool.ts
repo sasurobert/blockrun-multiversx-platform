@@ -72,6 +72,13 @@ export class MerchantPoolManager {
   }
 
   /**
+   * Registers or overrides a merchant address for a specific shard.
+   */
+  public registerMerchant(shard: number, address: string): void {
+    this.merchantsByShard.set(shard, address);
+  }
+
+  /**
    * Returns all registered shard merchants.
    */
   public getAllMerchants(): ShardMerchant[] {

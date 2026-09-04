@@ -5,6 +5,7 @@ export * from "./storage/types.js";
 export * from "./storage/memory_storage.js";
 export * from "./storage/sqlite_storage.js";
 export * from "./services/relayer_pool.js";
+export * from "./services/key_signer.js";
 export * from "./services/verifier.js";
 export * from "./services/settler.js";
 export * from "./services/settlement_queue.js";

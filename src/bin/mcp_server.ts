@@ -15,6 +15,7 @@ import { SettlerService } from "../services/settler.js";
 import { SqliteSettlementStorage } from "../storage/sqlite_storage.js";
 import { MemorySettlementStorage } from "../storage/memory_storage.js";
 import { UserSigner } from "@multiversx/sdk-wallet";
+import { SandboxExecutor } from "../services/sandbox_executor.js";
 
 async function main() {
   const port = parseInt(process.env.MCP_PORT || process.env.PORT || "3500", 10);
@@ -196,22 +197,20 @@ async function main() {
     },
   });
 
+  const sandbox = new SandboxExecutor({ timeoutMs: 1000 });
   executor.registerHandler("ai_code_interpreter", async (args) => {
-    const expr = String(args.expression || "2 + 2");
-    try {
-      const sanitized = expr.replace(/[^0-9+\-*/().%^eE,\sMath.sqrtcopsinlgx]/g, "");
-      const fn = new Function(`return (${sanitized});`);
-      const result = fn();
+    const expr = String(args.expression || args.code || "2 + 2");
+    const result = sandbox.execute(expr);
+    if (result.isError) {
       return {
-        content: [{ type: "text", text: `Result: ${result}` }],
-        isError: false,
-      };
-    } catch (err: any) {
-      return {
-        content: [{ type: "text", text: `Evaluation error: ${err.message}` }],
+        content: [{ type: "text", text: `Evaluation error: ${result.error}` }],
         isError: true,
       };
     }
+    return {
+      content: [{ type: "text", text: `Result: ${typeof result.result === "object" ? JSON.stringify(result.result) : result.result}` }],
+      isError: false,
+    };
   });
 
   // 4. Tool: Web Search / Markdown Scraper

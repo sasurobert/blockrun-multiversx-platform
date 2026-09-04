@@ -72,7 +72,7 @@ export class TollboothServer {
     });
 
     // Tollbooth analytics and telemetry
-    this.app.get("/stats", (_req: Request, res: Response) => {
+    this.app.get(["/stats", "/analytics"], (_req: Request, res: Response) => {
       res.json({
         totalRequests: 14280,
         botsIntercepted: 11450,
@@ -105,9 +105,144 @@ export class TollboothServer {
       });
     });
 
+    // Dynamic robots.txt advertising x402 payment scheme
+    this.app.get("/robots.txt", (_req: Request, res: Response) => {
+      const robotsContent = [
+        "User-agent: *",
+        "Disallow: /admin/",
+        "Disallow: /private/",
+        "",
+        "# ------------------------------------------------------------",
+        "# MultiversX x402 Micropayment Protocol for Autonomous AI Crawlers",
+        "# ------------------------------------------------------------",
+        "# AI crawlers (GPTBot, ClaudeBot, PerplexityBot, etc.) are allowed",
+        "# conditional on valid x402 micro-payment per page crawled.",
+        "X402-Payment-Required: true",
+        `X402-Network: ${this.network}`,
+        `X402-Asset: ${this.tokenIdentifier}`,
+        "X402-Rate: 1500 micro-USDC per page ($0.0015)",
+        "X402-Specification: https://x402.org",
+        "X402-Discovery: /.well-known/x402",
+        "X402-Facilitator-Endpoint: /verify",
+      ].join("\n");
+
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(robotsContent);
+    });
+
+    // Dynamic ai.txt per Emerging AI Crawler Standards
+    this.app.get("/ai.txt", (_req: Request, res: Response) => {
+      const aiTxtContent = [
+        "# AI Agent Crawling and Training Permissions",
+        "# Generated dynamically by MultiversX x402-tollbooth",
+        "",
+        "User-agent: GPTBot",
+        "Permission: allowed-with-payment",
+        "Payment-Protocol: x402-v2",
+        `Payment-Network: ${this.network}`,
+        `Payment-Asset: ${this.tokenIdentifier}`,
+        "Payment-Rate: 1500 micro-USDC",
+        "",
+        "User-agent: ClaudeBot",
+        "Permission: allowed-with-payment",
+        "Payment-Protocol: x402-v2",
+        `Payment-Network: ${this.network}`,
+        `Payment-Asset: ${this.tokenIdentifier}`,
+        "Payment-Rate: 1500 micro-USDC",
+        "",
+        "User-agent: PerplexityBot",
+        "Permission: allowed-with-payment",
+        "Payment-Protocol: x402-v2",
+        `Payment-Network: ${this.network}`,
+        `Payment-Asset: ${this.tokenIdentifier}`,
+        "Payment-Rate: 1500 micro-USDC",
+        "",
+        "User-agent: Google-Extended",
+        "Permission: allowed-with-payment",
+        "Payment-Protocol: x402-v2",
+        `Payment-Network: ${this.network}`,
+        `Payment-Asset: ${this.tokenIdentifier}`,
+        "Payment-Rate: 1500 micro-USDC",
+        "",
+        "User-agent: *",
+        "Permission: allowed-with-payment",
+        "Contact: mailto:sasu.robert@gmail.com",
+      ].join("\n");
+
+      res.setHeader("Content-Type", "text/plain; charset=utf-8");
+      res.send(aiTxtContent);
+    });
+
+    // OpenAPI & Swagger Interactive Documentation
+    this.app.get("/openapi.json", (_req: Request, res: Response) => {
+      res.json({
+        openapi: "3.0.3",
+        info: {
+          title: "MultiversX x402 Anti-Bot Tollbooth API",
+          version: "1.0.0",
+          description: "Anti-bot paywall and clean Markdown extraction engine for autonomous AI crawlers on MultiversX Devnet",
+          contact: { name: "Robert Sasu", email: "sasu.robert@gmail.com" },
+        },
+        servers: [{ url: "/", description: "Current Tollbooth instance" }],
+        paths: {
+          "/health": { get: { summary: "Health check", responses: { "200": { description: "Service is healthy" } } } },
+          "/analytics": { get: { summary: "Crawler monetization analytics", responses: { "200": { description: "Analytics metrics" } } } },
+          "/robots.txt": { get: { summary: "Dynamic x402 robots.txt", responses: { "200": { description: "Robots file" } } } },
+          "/ai.txt": { get: { summary: "Dynamic AI permissions ai.txt", responses: { "200": { description: "AI permissions file" } } } },
+          "/preview": { post: { summary: "Markdown extraction preview", responses: { "200": { description: "Extracted markdown and token savings" } } } },
+        },
+      });
+    });
+
+    this.app.get(["/docs", "/swagger"], (_req: Request, res: Response) => {
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>x402 Anti-Bot Tollbooth - Interactive API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .topbar { display: none; }
+    .swagger-ui { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>`;
+      res.type("html").send(html);
+    });
+
     // Intercept all GET requests
     this.app.get("*", async (req: Request, res: Response) => {
-      const classification = this.classifier.classify(req.headers as any);
+      const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
+      const classification = await this.classifier.verifyBot(req.headers as any, clientIp);
+
+      // If spoofed bot identity detected: reject and record abuse
+      if (classification.isSpoofed) {
+        if (this.abuseReporter) {
+          await this.abuseReporter.recordFailure(clientIp);
+        }
+        return res.status(403).json({
+          error: "Forbidden: Spoofed bot identity detected",
+          botName: classification.botName,
+          verificationStatus: "spoofed",
+        });
+      }
 
       // If human traffic: forward directly to origin
       if (!classification.isBot) {

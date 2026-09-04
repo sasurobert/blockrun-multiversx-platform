@@ -7,6 +7,7 @@ import {
 } from "../domain/types.js";
 import { SettlerService, ISettlerService } from "./settler.js";
 import { RelayerPoolManager, METACHAIN_SHARD_ID } from "./relayer_pool.js";
+import { getSignerBech32 } from "./key_signer.js";
 import { ISettlementStorage } from "../storage/types.js";
 import { INetworkProvider } from "../domain/network.js";
 
@@ -325,7 +326,7 @@ export class SettlementQueue implements ISettlementQueue {
       if (this.relayerPool && this.relayerPool.hasShard(shard)) {
         const relayers = this.relayerPool.getAllRelayersForShard(shard);
         for (const relayer of relayers) {
-          const relayerAddress = relayer.getAddress().bech32();
+          const relayerAddress = getSignerBech32(relayer);
           workers.push(
             new ShardWorker(shard, this.settler, {
               maxRetries: this.maxRetries,

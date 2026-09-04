@@ -1,10 +1,16 @@
 import { Address, AddressComputer } from "@multiversx/sdk-core";
 import { Mnemonic, parseUserKeys, UserSecretKey, UserSigner } from "@multiversx/sdk-wallet";
+import { IKeySigner, LocalKeySigner, getSignerBech32, getAddressBech32 } from "./key_signer.js";
 
 /**
  * MultiversX Metachain shard identifier.
  */
 export const METACHAIN_SHARD_ID = 4294967295;
+
+/**
+ * Supported relayer signer type: either native UserSigner or KeySigner abstraction.
+ */
+export type RelayerSigner = IKeySigner | UserSigner;
 
 /**
  * Options for configuring relayer discovery from mnemonic.
@@ -22,12 +28,12 @@ export interface MnemonicRelayerOptions {
  */
 export class RelayerPoolManager {
   private readonly addressComputer: AddressComputer;
-  private readonly shardRelayers: Map<number, UserSigner[]>;
+  private readonly shardRelayers: Map<number, RelayerSigner[]>;
   private readonly roundRobinIndex: Map<number, number>;
 
-  constructor(relayers?: Map<number, UserSigner | UserSigner[]> | Record<number, UserSigner | UserSigner[]>) {
+  constructor(relayers?: Map<number, RelayerSigner | RelayerSigner[]> | Record<number, RelayerSigner | RelayerSigner[]>) {
     this.addressComputer = new AddressComputer();
-    this.shardRelayers = new Map<number, UserSigner[]>();
+    this.shardRelayers = new Map<number, RelayerSigner[]>();
     this.roundRobinIndex = new Map<number, number>();
 
     if (relayers) {
@@ -61,11 +67,11 @@ export class RelayerPoolManager {
   /**
    * Registers a relayer signer for a specific shard.
    */
-  registerRelayer(shard: number, signer: UserSigner): void {
+  registerRelayer(shard: number, signer: RelayerSigner): void {
     const list = this.shardRelayers.get(shard) || [];
-    const signerAddr = signer.getAddress().bech32();
+    const signerAddr = getSignerBech32(signer);
     // Avoid duplicate registration of the same relayer address
-    if (!list.some((s) => s.getAddress().bech32() === signerAddr)) {
+    if (!list.some((s) => getSignerBech32(s) === signerAddr)) {
       list.push(signer);
       this.shardRelayers.set(shard, list);
     }
@@ -74,8 +80,8 @@ export class RelayerPoolManager {
   /**
    * Registers a relayer signer by computing its shard automatically.
    */
-  registerRelayerAuto(signer: UserSigner): number {
-    const shard = this.getShardForAddress(signer.getAddress().bech32());
+  registerRelayerAuto(signer: RelayerSigner): number {
+    const shard = this.getShardForAddress(getSignerBech32(signer));
     this.registerRelayer(shard, signer);
     return shard;
   }
@@ -88,9 +94,9 @@ export class RelayerPoolManager {
   }
 
   /**
-   * Returns the primary (first) UserSigner for the given shard.
+   * Returns the primary (first) relayer signer for the given shard.
    */
-  getRelayerForShard(shard: number): UserSigner {
+  getRelayerForShard(shard: number): RelayerSigner {
     const list = this.shardRelayers.get(shard);
     if (!list || list.length === 0) {
       throw new Error(`No relayer configured for shard ${shard}`);
@@ -99,9 +105,9 @@ export class RelayerPoolManager {
   }
 
   /**
-   * Returns the next UserSigner for the given shard using round-robin rotation.
+   * Returns the next relayer signer for the given shard using round-robin rotation.
    */
-  getNextRelayerForShard(shard: number): UserSigner {
+  getNextRelayerForShard(shard: number): RelayerSigner {
     const list = this.shardRelayers.get(shard);
     if (!list || list.length === 0) {
       throw new Error(`No relayer configured for shard ${shard}`);
@@ -114,9 +120,9 @@ export class RelayerPoolManager {
   }
 
   /**
-   * Returns all registered relayer UserSigners for the given shard.
+   * Returns all registered relayer signers for the given shard.
    */
-  getAllRelayersForShard(shard: number): UserSigner[] {
+  getAllRelayersForShard(shard: number): RelayerSigner[] {
     return [...(this.shardRelayers.get(shard) || [])];
   }
 
@@ -125,7 +131,7 @@ export class RelayerPoolManager {
    */
   getRelayerAddressForShard(shard: number): string {
     const relayer = this.getRelayerForShard(shard);
-    return relayer.getAddress().bech32();
+    return getSignerBech32(relayer);
   }
 
   /**
@@ -133,13 +139,13 @@ export class RelayerPoolManager {
    */
   getNextRelayerAddressForShard(shard: number): string {
     const relayer = this.getNextRelayerForShard(shard);
-    return relayer.getAddress().bech32();
+    return getSignerBech32(relayer);
   }
 
   /**
-   * Computes the shard of the given user address and returns a matching relayer UserSigner (round-robin).
+   * Computes the shard of the given user address and returns a matching relayer signer (round-robin).
    */
-  getRelayerForAddress(userAddress: string | Address): UserSigner {
+  getRelayerForAddress(userAddress: string | Address): RelayerSigner {
     const shard = this.getShardForAddress(userAddress);
     return this.getNextRelayerForShard(shard);
   }
@@ -149,7 +155,7 @@ export class RelayerPoolManager {
    */
   getRelayerAddressForUser(userAddress: string | Address): string {
     const relayer = this.getRelayerForAddress(userAddress);
-    return relayer.getAddress().bech32();
+    return getSignerBech32(relayer);
   }
 
   /**
@@ -167,19 +173,12 @@ export class RelayerPoolManager {
   }
 
   /**
-   * Finds and returns a configured UserSigner matching the given relayer address.
+   * Finds and returns a configured relayer signer matching the given relayer address.
    */
-  getRelayerByAddress(address: string | Address): UserSigner | undefined {
-    const target =
-      typeof address === "string"
-        ? address
-        : typeof (address as any).toBech32 === "function"
-        ? (address as any).toBech32()
-        : typeof (address as any).bech32 === "function"
-        ? (address as any).bech32()
-        : String(address);
+  getRelayerByAddress(address: string | Address): RelayerSigner | undefined {
+    const target = getAddressBech32(address);
     for (const list of this.shardRelayers.values()) {
-      const match = list.find((s) => s.getAddress().bech32() === target);
+      const match = list.find((s) => getSignerBech32(s) === target);
       if (match) {
         return match;
       }
@@ -190,8 +189,8 @@ export class RelayerPoolManager {
   /**
    * Returns a map of all primary registered relayers by shard.
    */
-  getAllRelayers(): Map<number, UserSigner> {
-    const result = new Map<number, UserSigner>();
+  getAllRelayers(): Map<number, RelayerSigner> {
+    const result = new Map<number, RelayerSigner>();
     for (const [shard, list] of this.shardRelayers.entries()) {
       if (list.length > 0) {
         result.set(shard, list[0]);
@@ -207,7 +206,7 @@ export class RelayerPoolManager {
     const result: Record<number, string> = {};
     for (const [shard, list] of this.shardRelayers.entries()) {
       if (list.length > 0) {
-        result[shard] = list[0].getAddress().bech32();
+        result[shard] = getSignerBech32(list[0]);
       }
     }
     return result;
@@ -219,7 +218,7 @@ export class RelayerPoolManager {
   getAllRelayerAddressesMulti(): Record<number, string[]> {
     const result: Record<number, string[]> = {};
     for (const [shard, list] of this.shardRelayers.entries()) {
-      result[shard] = list.map((s) => s.getAddress().bech32());
+      result[shard] = list.map((s) => getSignerBech32(s));
     }
     return result;
   }
@@ -277,17 +276,17 @@ export class RelayerPoolManager {
   }
 
   /**
-   * Initializes a RelayerPoolManager from a dictionary of shard IDs to private keys or UserSigners.
+   * Initializes a RelayerPoolManager from a dictionary of shard IDs to private keys, UserSigners, or KeySigners.
    */
   static fromPrivateKeys(
-    keysByShard: Record<number, string | UserSigner | UserSecretKey>
+    keysByShard: Record<number, string | RelayerSigner | UserSecretKey>
   ): RelayerPoolManager {
     const pool = new RelayerPoolManager();
 
     for (const [shardStr, keyOrSigner] of Object.entries(keysByShard)) {
       const shard = Number(shardStr);
-      if (keyOrSigner instanceof UserSigner) {
-        pool.registerRelayer(shard, keyOrSigner);
+      if (keyOrSigner instanceof UserSigner || (keyOrSigner && typeof (keyOrSigner as any).sign === "function" && typeof (keyOrSigner as any).getAddress === "function")) {
+        pool.registerRelayer(shard, keyOrSigner as RelayerSigner);
       } else if (keyOrSigner instanceof UserSecretKey) {
         pool.registerRelayer(shard, new UserSigner(keyOrSigner));
       } else if (typeof keyOrSigner === "string") {

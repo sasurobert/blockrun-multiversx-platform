@@ -110,6 +110,59 @@ export class ClawRouterServer {
       });
     });
 
+    // OpenAPI & Swagger Interactive Documentation
+    this.app.get("/openapi.json", (_req: Request, res: Response) => {
+      res.json({
+        openapi: "3.0.3",
+        info: {
+          title: "MultiversX ClawRouter API",
+          version: "1.0.0",
+          description: "Decentralized AI inference router with cascading fallback, TTFT SLA enforcement, and x402 micropayments on MultiversX Devnet",
+          contact: { name: "Robert Sasu", email: "sasu.robert@gmail.com" },
+        },
+        servers: [{ url: "/", description: "Current ClawRouter instance" }],
+        paths: {
+          "/health": { get: { summary: "Health check probe", responses: { "200": { description: "Healthy" } } } },
+          "/api/v1/claw/providers": { get: { summary: "List active AI providers", responses: { "200": { description: "Provider list" } } } },
+          "/api/v1/claw/speedometer": { get: { summary: "Live latency speedometer and circuit breaker metrics", responses: { "200": { description: "Speedometer metrics" } } } },
+          "/v1/chat/completions": { post: { summary: "OpenAI-compatible streaming chat completion with x402 payment", responses: { "200": { description: "SSE streaming tokens" }, "402": { description: "Payment Required" } } } },
+        },
+      });
+    });
+
+    this.app.get(["/docs", "/swagger"], (_req: Request, res: Response) => {
+      const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>MultiversX ClawRouter - Interactive API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .topbar { display: none; }
+    .swagger-ui { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [SwaggerUIBundle.presets.apis, SwaggerUIBundle.SwaggerUIStandalonePreset],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>`;
+      res.type("html").send(html);
+    });
+
     // Chat completions with sub-second arbitrage & cascading fallback
     this.app.post(["/api/v1/claw/chat/completions", "/v1/chat/completions"], async (req: Request, res: Response) => {
       const chatReq = req.body as ClawChatRequest;

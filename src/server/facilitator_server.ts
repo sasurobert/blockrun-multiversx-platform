@@ -228,6 +228,8 @@ export function createFacilitatorServer(options: FacilitatorServerOptions): Expr
         relayerAddress: "/relayer/address/:userAddress",
         relayerShards: "/relayer/shards",
         openapi: "/openapi.json",
+        docs: "/docs",
+        swagger: "/swagger",
       },
     });
   });
@@ -396,6 +398,46 @@ export function createFacilitatorServer(options: FacilitatorServerOptions): Expr
       description: options.description,
     });
     res.json(spec);
+  });
+
+  /**
+   * GET /docs & GET /swagger
+   * Serves interactive API documentation UI.
+   */
+  app.get(["/docs", "/swagger"], (_req: Request, res: Response) => {
+    const docsHtml = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>${facilitatorName} - Interactive API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+  <style>
+    body { margin: 0; padding: 0; background: #0f172a; color: #f8fafc; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; }
+    .topbar { display: none; }
+    .swagger-ui { max-width: 1200px; margin: 0 auto; padding: 20px; }
+  </style>
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js" crossorigin></script>
+  <script>
+    window.onload = () => {
+      window.ui = SwaggerUIBundle({
+        url: '/openapi.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true,
+        presets: [
+          SwaggerUIBundle.presets.apis,
+          SwaggerUIBundle.SwaggerUIStandalonePreset
+        ],
+        layout: "BaseLayout"
+      });
+    };
+  </script>
+</body>
+</html>`;
+    res.type("html").send(docsHtml);
   });
 
   // 5. Structured JSON error handling middleware

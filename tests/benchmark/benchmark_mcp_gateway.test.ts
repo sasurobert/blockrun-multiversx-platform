@@ -46,7 +46,9 @@ describe("MCP Gateway Concurrency & Performance Benchmark", () => {
       verifier: new FastVerifier(),
     });
 
-    const server = gateway.app.listen(0);
+    const server = await new Promise<any>((resolve) => {
+      const s = gateway.app.listen(0, "127.0.0.1", () => resolve(s));
+    });
     const port = (server.address() as any).port;
 
     const dummySig = Buffer.from(
@@ -66,6 +68,7 @@ describe("MCP Gateway Concurrency & Performance Benchmark", () => {
         request(`http://127.0.0.1:${port}`)
           .post("/mcp/v1/tools/call")
           .set("PAYMENT-SIGNATURE", dummySig)
+          .set("Connection", "close")
           .send({
             jsonrpc: "2.0",
             id: `bench-${i}`,
@@ -79,7 +82,7 @@ describe("MCP Gateway Concurrency & Performance Benchmark", () => {
 
       expect(responses.length).toBe(totalRequests);
       for (const res of responses) {
-        expect(res.status).toBe(200);
+        expect(res.status, JSON.stringify(res.body)).toBe(200);
         expect(res.body.result.isError).toBe(false);
         expect(res.headers["x-payment-settled"]).toBe("true");
       }
@@ -88,7 +91,7 @@ describe("MCP Gateway Concurrency & Performance Benchmark", () => {
       console.log(`MCP Gateway Benchmark: ${totalRequests} requests completed in ${duration}ms (${reqsPerSec} req/sec)`);
       expect(duration).toBeLessThan(10000);
     } finally {
-      server.close();
+      await new Promise<void>((resolve) => server.close(() => resolve()));
     }
   });
 });

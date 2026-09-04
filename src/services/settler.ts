@@ -186,7 +186,7 @@ export class SettlerService implements ISettlerService {
           this.relayerPool.getRelayerByAddress(relayerAddr) ??
           this.relayerPool.getRelayerForAddress(txPayload.sender);
         const bytesToSign = this.transactionComputer.computeBytesForSigning(tx);
-        const relayerSig = await relayerSigner.sign(bytesToSign);
+        const relayerSig = await relayerSigner.sign(Buffer.from(bytesToSign));
         tx.relayerSignature = relayerSig;
       }
     } catch (err: unknown) {
