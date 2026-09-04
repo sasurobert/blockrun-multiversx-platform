@@ -4,6 +4,18 @@
   "description": "MultiversX x402 Client SDK for autonomous agent payments, MCP tools, and AI scrapers on Devnet",
   "author": "Robert Sasu <sasu.robert@gmail.com>",
   "license": "MIT",
+  "publishConfig": {
+    "access": "public"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/sasurobert/blockrun-multiversx-platform.git",
+    "directory": "packages/client-sdk"
+  },
+  "homepage": "https://github.com/sasurobert/blockrun-multiversx-platform#readme",
+  "bugs": {
+    "url": "https://github.com/sasurobert/blockrun-multiversx-platform/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",

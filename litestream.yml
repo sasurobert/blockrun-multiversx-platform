@@ -1,0 +1,14 @@
+# Litestream S3 Streaming Replication Configuration
+# Continuously replicates SQLite WAL frames for zero data-loss disaster recovery
+dbs:
+  - path: /opt/blockrun-multiversx-platform/data/settlements.db
+    replicas:
+      - type: s3
+        bucket: "${LITESTREAM_S3_BUCKET:-blockrun-multiversx-backups}"
+        path: "settlements.db"
+        region: "${LITESTREAM_S3_REGION:-us-east-1}"
+        endpoint: "${LITESTREAM_S3_ENDPOINT:-https://s3.amazonaws.com}"
+        access-key-id: "${LITESTREAM_ACCESS_KEY_ID:-}"
+        secret-access-key: "${LITESTREAM_SECRET_ACCESS_KEY:-}"
+        sync-interval: 1s
+        retention: 72h

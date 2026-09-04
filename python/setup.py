@@ -8,6 +8,11 @@ setup(
     long_description_content_type="text/markdown",
     author="Robert Sasu",
     author_email="sasu.robert@gmail.com",
+    url="https://github.com/sasurobert/blockrun-multiversx-platform",
+    project_urls={
+        "Bug Tracker": "https://github.com/sasurobert/blockrun-multiversx-platform/issues",
+        "Source Code": "https://github.com/sasurobert/blockrun-multiversx-platform",
+    },
     license="MIT",
     packages=find_packages(),
     python_requires=">=3.9",

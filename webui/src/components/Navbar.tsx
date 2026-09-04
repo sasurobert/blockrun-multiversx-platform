@@ -1,8 +1,8 @@
 import React from "react";
-import { Zap, Cpu, Activity, ExternalLink, Wallet, LogOut, Gauge, Wrench, ShieldAlert } from "lucide-react";
+import { Zap, Cpu, Activity, ExternalLink, Wallet, LogOut, Gauge, Wrench, ShieldAlert, BookOpen } from "lucide-react";
 import { useWallet } from "../context/WalletContext";
 
-export type TabType = "playground" | "claw" | "mcp" | "tollbooth" | "fleet" | "shards" | "benchmark";
+export type TabType = "playground" | "claw" | "mcp" | "tollbooth" | "fleet" | "shards" | "benchmark" | "docs";
 
 interface NavbarProps {
   activeTab: TabType;
@@ -113,6 +113,17 @@ export const Navbar: React.FC<NavbarProps> = ({ activeTab, setActiveTab }) => {
           >
             <Zap className="h-3.5 w-3.5" />
             10k TPS
+          </button>
+          <button
+            onClick={() => setActiveTab("docs")}
+            className={`px-2.5 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all whitespace-nowrap cursor-pointer ${
+              activeTab === "docs"
+                ? "bg-emerald-500 text-black font-bold shadow-md shadow-emerald-500/30"
+                : "text-slate-400 hover:text-white"
+            }`}
+          >
+            <BookOpen className="h-3.5 w-3.5" />
+            Docs
           </button>
         </div>
 

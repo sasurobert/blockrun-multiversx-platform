@@ -110,6 +110,29 @@ export class ClawRouterServer {
       });
     });
 
+    // Dynamic spot pricing ingestion
+    this.app.post("/api/v1/claw/spot-pricing", (req: Request, res: Response) => {
+      const body = req.body;
+      const updates = Array.isArray(body)
+        ? body
+        : Array.isArray(body?.updates)
+        ? body.updates
+        : body && typeof body === "object" && Object.keys(body).length > 0
+        ? [body]
+        : [];
+
+      if (updates.length === 0) {
+        return res.status(400).json({ error: "Invalid request: Expected pricing updates array or object" });
+      }
+
+      const result = this.matrix.ingestSpotPricingFeed(updates);
+      res.json({
+        success: true,
+        updatedCount: result.updatedCount,
+        errors: result.errors.length > 0 ? result.errors : undefined,
+      });
+    });
+
     // OpenAPI & Swagger Interactive Documentation
     this.app.get("/openapi.json", (_req: Request, res: Response) => {
       res.json({
@@ -125,6 +148,15 @@ export class ClawRouterServer {
           "/health": { get: { summary: "Health check probe", responses: { "200": { description: "Healthy" } } } },
           "/api/v1/claw/providers": { get: { summary: "List active AI providers", responses: { "200": { description: "Provider list" } } } },
           "/api/v1/claw/speedometer": { get: { summary: "Live latency speedometer and circuit breaker metrics", responses: { "200": { description: "Speedometer metrics" } } } },
+          "/api/v1/claw/spot-pricing": {
+            post: {
+              summary: "Ingest dynamic spot pricing updates for routing matrix providers",
+              responses: {
+                "200": { description: "Pricing feed ingested successfully" },
+                "400": { description: "Invalid request payload" },
+              },
+            },
+          },
           "/v1/chat/completions": { post: { summary: "OpenAI-compatible streaming chat completion with x402 payment", responses: { "200": { description: "SSE streaming tokens" }, "402": { description: "Payment Required" } } } },
         },
       });

@@ -39,8 +39,10 @@ coverage/
 wallets/
 keys/
 
-# Python cache
+# Python cache & packaging
 __pycache__/
 *.py[cod]
 *$py.class
+*.egg-info/
+python/dist/
 

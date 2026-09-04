@@ -59,8 +59,12 @@ export function ipMatchesCidr(ip: string, cidr: string): boolean {
 /**
  * Validates whether an IP belongs to a bot family using CIDR matching.
  */
-export function checkBotCidr(ip: string, botFamily: string): boolean {
-  const cidrs = KNOWN_BOT_CIDRS[botFamily];
+export function checkBotCidr(
+  ip: string,
+  botFamily: string,
+  daemon?: { getBotCidrs: (fam: string) => string[] }
+): boolean {
+  const cidrs = daemon ? daemon.getBotCidrs(botFamily) : KNOWN_BOT_CIDRS[botFamily];
   if (!cidrs) return false;
   return cidrs.some((cidr) => ipMatchesCidr(ip, cidr));
 }
@@ -140,6 +144,12 @@ const BOT_USER_AGENTS = [
 export class BotClassifier {
   private dnsCache = new Map<string, { verified: boolean; hostname?: string; timestamp: number }>();
   private cacheTtlMs: number = 300_000; // 5 minutes
+  private cidrDaemon?: { getBotCidrs: (fam: string) => string[] };
+
+  constructor(options?: { cacheTtlMs?: number; cidrDaemon?: { getBotCidrs: (fam: string) => string[] } }) {
+    this.cacheTtlMs = options?.cacheTtlMs ?? 300_000;
+    this.cidrDaemon = options?.cidrDaemon;
+  }
 
   public classify(
     headers: Record<string, string | string[] | undefined>,
@@ -253,7 +263,7 @@ export class BotClassifier {
     }
 
     // 1. Fast path: CIDR match
-    if (checkBotCidr(clientIp, family)) {
+    if (checkBotCidr(clientIp, family, this.cidrDaemon)) {
       return {
         ...basic,
         verificationStatus: "verified",

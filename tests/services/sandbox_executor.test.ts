@@ -112,5 +112,32 @@ describe("SandboxExecutor (Node.js vm isolation)", () => {
     expect(res.isError).toBe(false);
     expect([].constructor).toBe(Array);
   });
+
+  it("should reject scripts exceeding maximum length boundary (64KB)", () => {
+    const hugeCode = "1 + ".repeat(25000) + "1";
+    const res = sandbox.execute(hugeCode);
+    expect(res.isError).toBe(true);
+    expect(res.error).toContain("code exceeds maximum permitted length");
+  });
+
+  it("should block timer primitives and async scheduling", () => {
+    const resTimeout = sandbox.execute("setTimeout(() => {}, 100)");
+    expect(resTimeout.isError).toBe(true);
+    expect(resTimeout.error).toContain("Security Violation");
+
+    const resMicrotask = sandbox.execute("queueMicrotask(() => {})");
+    expect(resMicrotask.isError).toBe(true);
+    expect(resMicrotask.error).toContain("Security Violation");
+  });
+
+  it("should block shared memory and concurrency primitives", () => {
+    const resSab = sandbox.execute("new SharedArrayBuffer(1024)");
+    expect(resSab.isError).toBe(true);
+    expect(resSab.error).toContain("Security Violation");
+
+    const resAtomics = sandbox.execute("Atomics.wait(new Int32Array(4), 0, 0)");
+    expect(resAtomics.isError).toBe(true);
+    expect(resAtomics.error).toContain("Security Violation");
+  });
 });
 

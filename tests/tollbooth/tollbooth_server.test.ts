@@ -218,4 +218,108 @@ describe("TollboothServer (TDD)", () => {
     expect(analyticsRes.status).toBe(200);
     expect(analyticsRes.body.revenueMicroUsdc).toBe(statsRes.body.revenueMicroUsdc);
   });
+
+  it("should cache converted markdown at edge with TTL, ETag, and serve repeated requests without re-scraping origin", async () => {
+    const paymentSig = Buffer.from(
+      JSON.stringify({
+        x402Version: 2,
+        network: "multiversx:1",
+        scheme: "exact",
+        payload: {
+          nonce: 1,
+          value: "0",
+          receiver: "erd1ka0yrspygvjtktyzxu58ufn0kujkqgx4gq2ch5ev2aqjcem9jcqqkntrmv",
+          sender: "erd1client000000000000000000000000000000000000000000000000000000",
+          signature: "valid-sig",
+        },
+      })
+    ).toString("base64");
+
+    // Request 1: Cache Miss, hits origin
+    const res1 = await request(tollbooth.app)
+      .get("/blog/scalable-mcp")
+      .set("user-agent", "GPTBot/1.2")
+      .set("x-forwarded-for", "20.15.240.68")
+      .set("payment-signature", paymentSig);
+
+    expect(res1.status).toBe(200);
+    expect(res1.headers["x-cache"]).toBe("MISS");
+    expect(res1.headers["etag"]).toBeDefined();
+    expect(res1.headers["cache-control"]).toContain("max-age=300");
+    expect(mockOriginFetch).toHaveBeenCalledTimes(1);
+
+    const etag = res1.headers["etag"];
+
+    // Request 2: Cache Hit, serves from cache without hitting origin again
+    const startHit = Date.now();
+    const res2 = await request(tollbooth.app)
+      .get("/blog/scalable-mcp")
+      .set("user-agent", "GPTBot/1.2")
+      .set("x-forwarded-for", "20.15.240.68")
+      .set("payment-signature", paymentSig);
+    const hitDuration = Date.now() - startHit;
+
+    expect(res2.status).toBe(200);
+    expect(res2.headers["x-cache"]).toBe("HIT");
+    expect(res2.headers["etag"]).toBe(etag);
+    expect(hitDuration).toBeLessThan(50); // fast local cache response
+    // Origin fetch count remains 1!
+    expect(mockOriginFetch).toHaveBeenCalledTimes(1);
+
+    // Request 3: Conditional Request with matching If-None-Match returns 304
+    const res3 = await request(tollbooth.app)
+      .get("/blog/scalable-mcp")
+      .set("user-agent", "GPTBot/1.2")
+      .set("x-forwarded-for", "20.15.240.68")
+      .set("if-none-match", etag)
+      .set("payment-signature", paymentSig);
+
+    expect(res3.status).toBe(304);
+  });
+
+  it("should generate publisher verification challenge and verify domain ownership via DNS / meta tag", async () => {
+    const publisherAddress = "erd123g08w7g2p9qxynfhplxukearq68uyqn2fvepyyf33pd40ea95as02yv3k";
+    const domain = "crypto-ai-news.org";
+
+    // 1. Request verification challenge
+    const challengeRes = await request(tollbooth.app)
+      .post("/tollbooth/v1/publishers/challenge")
+      .send({ domain, publisherAddress });
+
+    expect(challengeRes.status).toBe(200);
+    expect(challengeRes.body.success).toBe(true);
+    expect(challengeRes.body.challenge.dnsRecordName).toBe("_x402-challenge.crypto-ai-news.org");
+    expect(challengeRes.body.challenge.challengeToken).toBeDefined();
+
+    let activeToken = "";
+
+    // Configure mock resolver in publisher verifier
+    tollbooth.publisherVerifier = new (tollbooth.publisherVerifier.constructor as any)({
+      customResolver: async (host: string) => {
+        if (host === "_x402-challenge.crypto-ai-news.org") {
+          return [[`x402-verification=${activeToken}`]];
+        }
+        return [];
+      },
+      customFetcher: async () => `<meta name="x402-verification" content="${activeToken}">`,
+    });
+
+    // Re-seed challenge in newly instantiated verifier
+    const seeded = tollbooth.publisherVerifier.createChallenge(domain, publisherAddress);
+    activeToken = seeded.challengeToken;
+
+    // 2. Verify domain
+    const verifyRes = await request(tollbooth.app)
+      .post("/tollbooth/v1/publishers/verify")
+      .send({ domain, publisherAddress, method: "dns" });
+
+    expect(verifyRes.status).toBe(200);
+    expect(verifyRes.body.success).toBe(true);
+    expect(verifyRes.body.result.verified).toBe(true);
+
+    // 3. Query domain status
+    const statusRes = await request(tollbooth.app).get(`/tollbooth/v1/publishers/${domain}/status`);
+    expect(statusRes.status).toBe(200);
+    expect(statusRes.body.verified).toBe(true);
+  });
 });

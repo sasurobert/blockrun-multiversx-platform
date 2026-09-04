@@ -6,11 +6,19 @@ import { MarkdownExtractor } from "./markdown_extractor.js";
 import { TollPricingEngine } from "./toll_pricing_engine.js";
 import { TollboothReputationAdapter } from "./reputation_adapter.js";
 import { AbuseReporter } from "./abuse_reporter.js";
+import { PublisherVerifier } from "./publisher_verifier.js";
 import { PipelinedSettlementQueue } from "../services/pipelined_settlement_queue.js";
 import { SettlementQueue } from "../services/settlement_queue.js";
 import { IVerifierService } from "../services/verifier.js";
 import { PaymentRequirements, X402PaymentPayload } from "../domain/types.js";
 import { ISettlementStorage } from "../storage/types.js";
+
+export interface CachedMarkdownEntry {
+  markdown: string;
+  etag: string;
+  timestamp: number;
+  estimatedTokens: number;
+}
 
 export interface TollboothServerOptions {
   classifier?: BotClassifier;
@@ -18,6 +26,8 @@ export interface TollboothServerOptions {
   pricingEngine?: TollPricingEngine;
   reputationAdapter?: TollboothReputationAdapter;
   abuseReporter?: AbuseReporter;
+  publisherVerifier?: PublisherVerifier;
+  cacheTtlMs?: number;
   settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
   verifier: IVerifierService;
   originUrl?: string;
@@ -34,6 +44,9 @@ export class TollboothServer {
   public pricingEngine: TollPricingEngine;
   public reputationAdapter?: TollboothReputationAdapter;
   public abuseReporter?: AbuseReporter;
+  public publisherVerifier: PublisherVerifier;
+  public cacheTtlMs: number;
+  public markdownCache = new Map<string, CachedMarkdownEntry>();
   public settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
   public verifier: IVerifierService;
   public originUrl: string;
@@ -48,6 +61,8 @@ export class TollboothServer {
     this.pricingEngine = options.pricingEngine ?? new TollPricingEngine();
     this.reputationAdapter = options.reputationAdapter;
     this.abuseReporter = options.abuseReporter;
+    this.publisherVerifier = options.publisherVerifier ?? new PublisherVerifier();
+    this.cacheTtlMs = options.cacheTtlMs ?? 300_000;
     this.settlementQueue = options.settlementQueue;
     this.verifier = options.verifier;
     this.originUrl = options.originUrl ?? "http://localhost:8080";
@@ -227,6 +242,39 @@ export class TollboothServer {
       res.type("html").send(html);
     });
 
+    // Publisher Domain Verification Endpoints
+    this.app.post("/tollbooth/v1/publishers/challenge", (req: Request, res: Response) => {
+      const domain = req.body?.domain;
+      const publisherAddress = req.body?.publisherAddress;
+      if (!domain || !publisherAddress) {
+        return res.status(400).json({ error: "Missing required domain or publisherAddress in request body" });
+      }
+      const challenge = this.publisherVerifier.createChallenge(domain, publisherAddress);
+      return res.status(200).json({
+        success: true,
+        challenge,
+      });
+    });
+
+    this.app.post("/tollbooth/v1/publishers/verify", async (req: Request, res: Response) => {
+      const domain = req.body?.domain;
+      const publisherAddress = req.body?.publisherAddress;
+      const method = req.body?.method || "auto";
+      if (!domain || !publisherAddress) {
+        return res.status(400).json({ error: "Missing required domain or publisherAddress in request body" });
+      }
+      const result = await this.publisherVerifier.verifyDomain(domain, publisherAddress, method);
+      return res.status(result.verified ? 200 : 422).json({
+        success: result.verified,
+        result,
+      });
+    });
+
+    this.app.get("/tollbooth/v1/publishers/:domain/status", (req: Request, res: Response) => {
+      const verified = this.publisherVerifier.isDomainVerified(req.params.domain);
+      return res.json({ domain: req.params.domain, verified });
+    });
+
     // Intercept all GET requests
     this.app.get("*", async (req: Request, res: Response) => {
       const clientIp = (req.headers["x-forwarded-for"] as string)?.split(",")[0]?.trim() || req.ip || req.socket.remoteAddress || "127.0.0.1";
@@ -334,15 +382,50 @@ export class TollboothServer {
         });
       }
 
-      // Payment verified! Fetch HTML from origin and transform into clean Markdown
+      // Payment verified! Edge Markdown Caching with TTL and ETag support
       try {
         const originTarget = `${this.originUrl}${req.originalUrl}`;
-        const originRes = await this.originFetch(originTarget, {
-          headers: { "User-Agent": "x402-Tollbooth/1.0" },
-        });
+        const cacheKey = originTarget;
+        const now = Date.now();
+        const cached = this.markdownCache.get(cacheKey);
 
-        const rawHtml = await originRes.text();
-        const extracted = this.extractor.extract(rawHtml);
+        let markdown: string;
+        let etag: string;
+        let estimatedTokens: number;
+        let isCacheHit = false;
+
+        if (cached && now - cached.timestamp < this.cacheTtlMs) {
+          markdown = cached.markdown;
+          etag = cached.etag;
+          estimatedTokens = cached.estimatedTokens;
+          isCacheHit = true;
+        } else {
+          const originRes = await this.originFetch(originTarget, {
+            headers: { "User-Agent": "x402-Tollbooth/1.0" },
+          });
+
+          const rawHtml = await originRes.text();
+          const extracted = this.extractor.extract(rawHtml);
+          markdown = extracted.markdown;
+          estimatedTokens = extracted.estimatedTokens;
+          etag = `"${crypto.createHash("sha256").update(markdown).digest("hex").slice(0, 16)}"`;
+
+          this.markdownCache.set(cacheKey, {
+            markdown,
+            etag,
+            timestamp: now,
+            estimatedTokens,
+          });
+        }
+
+        // Conditional ETag evaluation: return 304 Not Modified if unchanged
+        const ifNoneMatch = req.headers["if-none-match"];
+        if (ifNoneMatch && ifNoneMatch === etag) {
+          res.setHeader("ETag", etag);
+          res.setHeader("Cache-Control", `public, max-age=${Math.round(this.cacheTtlMs / 1000)}`);
+          res.setHeader("X-Cache", isCacheHit ? "HIT" : "MISS");
+          return res.status(304).end();
+        }
 
         let txHash = crypto.randomBytes(32).toString("hex");
 
@@ -361,12 +444,15 @@ export class TollboothServer {
         }
 
         res.setHeader("Content-Type", "text/markdown; charset=utf-8");
+        res.setHeader("ETag", etag);
+        res.setHeader("Cache-Control", `public, max-age=${Math.round(this.cacheTtlMs / 1000)}`);
+        res.setHeader("X-Cache", isCacheHit ? "HIT" : "MISS");
         res.setHeader("X-Payment-Receipt", txHash);
         res.setHeader("X-Payment-Settled", "true");
-        res.setHeader("X-Tollbooth-Tokens", String(extracted.estimatedTokens));
+        res.setHeader("X-Tollbooth-Tokens", String(estimatedTokens));
         res.setHeader("X-Tollbooth-Tier", toll.tier);
 
-        return res.status(200).send(extracted.markdown);
+        return res.status(200).send(markdown);
       } catch (err: unknown) {
         const message = err instanceof Error ? err.message : String(err);
         return res.status(502).send(`Bad Gateway: Failed to fetch from origin: ${message}`);

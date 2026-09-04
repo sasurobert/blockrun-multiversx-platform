@@ -57,9 +57,22 @@ export class SandboxExecutor {
     options?: { timeoutMs?: number; maxMemoryBytes?: number }
   ): SandboxExecutionResult {
     const startTime = Date.now();
-    const timeout = options?.timeoutMs ?? this.defaultTimeoutMs;
 
-    // Reject dangerous keywords upfront
+    // 1. Strict input length boundary check (64KB max)
+    if (typeof code !== "string" || code.length > 65536) {
+      return {
+        result: null,
+        isError: true,
+        error: "Security Violation: code exceeds maximum permitted length (64KB)",
+        executionTimeMs: 0,
+      };
+    }
+
+    // 2. Strict timeout clamping: enforce hard boundary between 10ms and 5000ms
+    const rawTimeout = options?.timeoutMs ?? this.defaultTimeoutMs;
+    const timeout = Math.min(Math.max(rawTimeout, 10), 5000);
+
+    // 3. Reject dangerous keywords and host-escape primitives upfront
     const forbiddenPatterns = [
       /\bprocess\b/,
       /\brequire\b/,
@@ -75,6 +88,19 @@ export class SandboxExecutor {
       /\bprototype\b/,
       /\bWebAssembly\b/,
       /\bReflect\b/,
+      /\bSharedArrayBuffer\b/,
+      /\bAtomics\b/,
+      /\bqueueMicrotask\b/,
+      /\bsetImmediate\b/,
+      /\bsetInterval\b/,
+      /\bsetTimeout\b/,
+      /\bclearImmediate\b/,
+      /\bclearInterval\b/,
+      /\bclearTimeout\b/,
+      /\bAsyncFunction\b/,
+      /\bGeneratorFunction\b/,
+      /\bFinalizationRegistry\b/,
+      /\bWeakRef\b/,
     ];
 
     for (const pattern of forbiddenPatterns) {
@@ -90,9 +116,7 @@ export class SandboxExecutor {
 
     const startMemory = process.memoryUsage().heapUsed;
 
-    // Build isolated sandbox context without polluting host or leaking host prototypes.
-    // vm.createContext instantiates standard globals (Math, Number, String, Array, Date, JSON, etc.)
-    // native to the guest realm.
+    // 4. Build isolated sandbox context without polluting host or leaking host prototypes
     const sandboxContext = Object.create(null);
     sandboxContext.console = Object.freeze({
       log: () => {},
@@ -102,7 +126,7 @@ export class SandboxExecutor {
 
     const context = vm.createContext(sandboxContext);
 
-    // Defense-in-depth: delete constructor accessors inside the isolated guest context realm
+    // 5. Defense-in-depth: strip dangerous constructors, timers, and async primitives inside guest realm
     try {
       vm.runInContext(
         `
@@ -110,6 +134,10 @@ export class SandboxExecutor {
         try { delete Function.prototype.constructor; } catch (_) {}
         try { delete Array.prototype.constructor; } catch (_) {}
         try { delete Promise.prototype.constructor; } catch (_) {}
+        try { delete this.setTimeout; delete this.setInterval; delete this.setImmediate; } catch (_) {}
+        try { delete this.clearTimeout; delete this.clearInterval; delete this.clearImmediate; } catch (_) {}
+        try { delete this.queueMicrotask; } catch (_) {}
+        try { delete this.SharedArrayBuffer; delete this.Atomics; delete this.WebAssembly; } catch (_) {}
         `,
         context
       );

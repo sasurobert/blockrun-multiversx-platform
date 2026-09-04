@@ -5,6 +5,7 @@ import {
   checkBotCidr,
   verifyBotDns,
 } from "../../src/tollbooth/bot_classifier.js";
+import { BotCidrFeedIngestionDaemon } from "../../src/tollbooth/anti_spoofing.js";
 
 describe("Tollbooth Bot Anti-Spoofing & FCrDNS Verification (TDD)", () => {
   it("should correctly match IPv4 subnets using ipMatchesCidr", () => {
@@ -84,6 +85,50 @@ describe("Tollbooth Bot Anti-Spoofing & FCrDNS Verification (TDD)", () => {
     expect(ipMatchesCidr("", "1.2.3.0/24")).toBe(false);
     expect(ipMatchesCidr("1.2.3.4", "")).toBe(false);
     expect(ipMatchesCidr("1.2.3.4", "invalid_cidr")).toBe(false);
+  });
+
+  it("should dynamically ingest official crawler CIDR feed and update active bot table", async () => {
+    const mockOpenAiFeed = {
+      prefixes: [
+        { ipv4Prefix: "20.15.240.64/28" },
+        { ipv4Prefix: "198.51.100.0/24" }, // Newly published dynamic subnet
+      ],
+    };
+
+    const mockFetch = async (url: string) => {
+      if (url.includes("gptbot.json")) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => mockOpenAiFeed,
+        } as any;
+      }
+      return { ok: false, status: 404 } as any;
+    };
+
+    const daemon = new BotCidrFeedIngestionDaemon({ fetchFn: mockFetch as any });
+    const res = await daemon.fetchFeedForBot("openai");
+
+    expect(res.success).toBe(true);
+    expect(res.fromFallback).toBe(false);
+    expect(res.cidrs).toContain("198.51.100.0/24");
+
+    // Dynamic IP now matches via checkBotCidr
+    expect(checkBotCidr("198.51.100.42", "openai", daemon)).toBe(true);
+  });
+
+  it("should gracefully fall back to local known CIDRs if upstream feed fails", async () => {
+    const failingFetch = async () => {
+      throw new Error("Network offline or DNS resolution failed");
+    };
+
+    const daemon = new BotCidrFeedIngestionDaemon({ fetchFn: failingFetch as any });
+    const res = await daemon.fetchFeedForBot("openai");
+
+    expect(res.success).toBe(false);
+    expect(res.fromFallback).toBe(true);
+    // Still matches standard static fallback CIDRs
+    expect(checkBotCidr("20.15.240.68", "openai", daemon)).toBe(true);
   });
 });
 

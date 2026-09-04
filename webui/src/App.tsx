@@ -7,6 +7,7 @@ import { StressVisualizer } from "./components/StressVisualizer";
 import { ClawSpeedometer } from "./components/ClawSpeedometer";
 import { McpMarketplace } from "./components/McpMarketplace";
 import { TollboothDashboard } from "./components/TollboothDashboard";
+import { DeveloperDocs } from "./components/DeveloperDocs";
 import { WalletProvider } from "./context/WalletContext";
 import { WalletModal } from "./components/WalletModal";
 import { ErrorBoundary } from "./components/ErrorBoundary";
@@ -28,6 +29,7 @@ export const App: React.FC = () => {
             {activeTab === "fleet" && <AgentFleet />}
             {activeTab === "shards" && <ShardMonitor />}
             {activeTab === "benchmark" && <StressVisualizer />}
+            {activeTab === "docs" && <DeveloperDocs />}
           </main>
 
           <footer className="border-t border-slate-800/80 bg-[#0d121f] py-6 text-center text-xs text-slate-500 font-mono">

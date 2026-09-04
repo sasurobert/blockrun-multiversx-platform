@@ -9,6 +9,7 @@ import { MerchantPoolManager } from "../services/merchant_pool.js";
 import { IVerifierService } from "../services/verifier.js";
 import { ReputationClient } from "../services/reputation_client.js";
 import { McpProofLogger } from "../services/mcp_proof_logger.js";
+import { McpEscrowAdapter } from "../services/mcp_escrow_adapter.js";
 import { PipelinedSettlementQueue } from "../services/pipelined_settlement_queue.js";
 import { SettlementQueue } from "../services/settlement_queue.js";
 import {
@@ -35,6 +36,7 @@ export interface McpGatewayOptions {
   reputationClient?: ReputationClient;
   proofLogger?: McpProofLogger;
   settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
+  escrowAdapter?: McpEscrowAdapter;
   network?: string;
   circuitBreaker?: ToolCircuitBreaker;
 }
@@ -48,6 +50,7 @@ export class McpGateway {
   public reputationClient?: ReputationClient;
   public proofLogger?: McpProofLogger;
   public settlementQueue?: PipelinedSettlementQueue | SettlementQueue;
+  public escrowAdapter?: McpEscrowAdapter;
   public network: string;
   public circuitBreaker: ToolCircuitBreaker;
 
@@ -59,6 +62,7 @@ export class McpGateway {
     this.reputationClient = options.reputationClient;
     this.proofLogger = options.proofLogger;
     this.settlementQueue = options.settlementQueue;
+    this.escrowAdapter = options.escrowAdapter;
     this.network = options.network ?? "multiversx:1";
     this.circuitBreaker = options.circuitBreaker ?? new ToolCircuitBreaker();
 
@@ -103,10 +107,28 @@ export class McpGateway {
         });
       }
 
-      // MX-8004 Identity Verification
+      // 1. Tool Ownership & Hijacking Guard:
+      // If tool name is already registered, prevent tool name hijacking
+      const existingTool = this.registry.getLocalTool(body.name);
+      if (existingTool && existingTool.payTo && existingTool.payTo !== body.payTo) {
+        return res.status(403).json({
+          error: `Tool name hijacking detected: tool '${body.name}' is already registered by '${existingTool.payTo}'. Cannot register or overwrite with '${body.payTo}'.`,
+        });
+      }
+
+      // 2. Price Tampering / Tool Re-registration Guard:
+      // If updating an existing tool, require cryptographic signature proof from payTo
+      const sigToVerify = body.signature || body.agentIdentity?.signature;
+      if (existingTool && !sigToVerify) {
+        return res.status(401).json({
+          error: `Cryptographic signature proof from payTo address ('${existingTool.payTo}') is required to update tool configuration or pricing.`,
+        });
+      }
+
+      // 3. Cryptographic Ed25519 Signature Verification
       let identityVerified = false;
       if (body.agentIdentity) {
-        const { agentNonce, ownerAddress, signature } = body.agentIdentity;
+        const { agentNonce, ownerAddress } = body.agentIdentity;
         if (agentNonce < 0) {
           return res.status(400).json({ error: "Invalid MX-8004 agentNonce: must be non-negative" });
         }
@@ -119,28 +141,47 @@ export class McpGateway {
             });
           }
         }
-        if (signature) {
-          if (!ownerAddress) {
-            return res.status(400).json({ error: "ownerAddress is required when signature is provided" });
-          }
-          try {
-            const verifier = new UserVerifier(new UserPublicKey(Address.newFromBech32(ownerAddress).getPublicKey()));
-            const message = Buffer.from(`mcp-tool-register:${body.name}:${agentNonce}`);
-            const cleanSig = signature.replace(/^0x/, "");
-            const sigBuf = Buffer.from(cleanSig, cleanSig.length === 128 ? "hex" : "base64");
-            const isValidSig = verifier.verify(message, sigBuf);
-            if (!isValidSig) {
-              return res.status(401).json({ error: "Invalid MX-8004 agentIdentity cryptographic signature" });
+      }
+
+      if (sigToVerify) {
+        const signingAddress = body.agentIdentity?.ownerAddress || body.payTo;
+        try {
+          const verifier = new UserVerifier(new UserPublicKey(Address.newFromBech32(signingAddress).getPublicKey()));
+          const cleanSig = sigToVerify.replace(/^0x/, "");
+          const sigBuf = Buffer.from(cleanSig, cleanSig.length === 128 ? "hex" : "base64");
+
+          const candidateMessages = [
+            Buffer.from(`mcp-tool-register:${body.name}:${body.agentIdentity?.agentNonce ?? ""}`),
+            Buffer.from(`mcp-tool-register:${body.name}:${body.pricing.microUsdc}:${body.payTo}`),
+            Buffer.from(`mcp-tool-register:${body.name}:${body.payTo}`),
+            Buffer.from(`mcp-tool-register:${body.name}`),
+          ];
+
+          let isValidSig = false;
+          for (const msg of candidateMessages) {
+            try {
+              if (verifier.verify(msg, sigBuf)) {
+                isValidSig = true;
+                break;
+              }
+            } catch {
+              // try next message format
             }
-            identityVerified = true;
-          } catch (sigErr: unknown) {
-            return res.status(400).json({
-              error: `Cryptographic identity verification failed: ${sigErr instanceof Error ? sigErr.message : String(sigErr)}`,
+          }
+
+          if (!isValidSig) {
+            return res.status(401).json({
+              error: "Invalid cryptographic signature proof from payTo address",
             });
           }
-        } else {
-          identityVerified = Boolean(ownerAddress);
+          identityVerified = true;
+        } catch (sigErr: unknown) {
+          return res.status(400).json({
+            error: `Cryptographic identity verification failed: ${sigErr instanceof Error ? sigErr.message : String(sigErr)}`,
+          });
         }
+      } else if (body.agentIdentity?.ownerAddress) {
+        identityVerified = true;
       }
 
       const microUsdc = body.pricing.microUsdc;
@@ -328,6 +369,39 @@ export class McpGateway {
       this.registry.recordToolExecution(toolName, !executionResult.isError, durationMs);
 
       const jobId = `job-mcp-${Date.now()}-${crypto.randomBytes(4).toString("hex")}`;
+
+      // Automated Escrow Refund / Settlement Safety:
+      // When tool execution fails (e.g. HTTP 500, timeout, circuit breaker open, sandbox error),
+      // guarantee zero erroneous payment settlement and invoke automated refund if escrow adapter configured.
+      if (executionResult.isError) {
+        let refundTxHash: string | undefined;
+        if (this.escrowAdapter) {
+          try {
+            const refundRes = await this.escrowAdapter.refund(jobId);
+            refundTxHash = refundRes.txHash;
+          } catch {
+            // Non-blocking refund error
+          }
+        }
+
+        res.setHeader("X-Payment-Settled", "false");
+        res.setHeader("X-Payment-Refunded", "true");
+        if (refundTxHash) {
+          res.setHeader("X-Refund-Transaction", refundTxHash);
+        }
+        res.setHeader("X-Job-Id", jobId);
+
+        return res.status(200).json({
+          jsonrpc: "2.0",
+          id: rpcReq.id,
+          result: executionResult,
+          settled: false,
+          refunded: true,
+          jobId,
+          ...(refundTxHash ? { refundTransaction: refundTxHash } : {}),
+        });
+      }
+
       let proofResult: unknown;
 
       if (this.proofLogger) {

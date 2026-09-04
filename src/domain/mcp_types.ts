@@ -94,6 +94,7 @@ export const McpToolRegisterRequestSchema = z.object({
       proof: z.string().optional(),
     })
     .optional(),
+  signature: z.string().optional(),
   endpointUrl: z.string().url().optional(),
 });
 

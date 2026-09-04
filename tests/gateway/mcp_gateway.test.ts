@@ -1,11 +1,13 @@
 import { describe, it, expect, beforeEach, vi } from "vitest";
 import request from "supertest";
+import { Mnemonic, UserSigner } from "@multiversx/sdk-wallet";
 import { McpGateway } from "../../src/gateway/mcp_gateway.js";
 import { McpRegistryAdapter } from "../../src/services/mcp_registry_adapter.js";
 import { McpExecutor } from "../../src/services/mcp_executor.js";
 import { MerchantPoolManager } from "../../src/services/merchant_pool.js";
 import { IVerifierService } from "../../src/services/verifier.js";
 import { McpProofLogger } from "../../src/services/mcp_proof_logger.js";
+import { McpEscrowAdapter } from "../../src/services/mcp_escrow_adapter.js";
 import { ReputationClient } from "../../src/services/reputation_client.js";
 import { VerifyResponse, PaymentErrorCode } from "../../src/domain/types.js";
 
@@ -466,6 +468,162 @@ describe("McpGateway (TDD)", () => {
       expect(openapiRes.status).toBe(200);
       expect(openapiRes.body.openapi).toBe("3.0.3");
       expect(openapiRes.body.info.title).toContain("MCP Gateway");
+    });
+
+    it("should prevent tool name hijacking when another payTo attempts to overwrite existing tool", async () => {
+      const originalPayload = {
+        name: "protected-security-scanner",
+        description: "Original tool",
+        pricing: { microUsdc: "10000" },
+        payTo: validPayTo,
+      };
+
+      const reg1 = await request(gateway.app).post("/mcp/v1/tools/register").send(originalPayload);
+      expect(reg1.status).toBe(201);
+
+      // Hijacker attempts to register with different payTo address
+      const hijackerSigner = new UserSigner(Mnemonic.generate().deriveKey(0));
+      const hijackerPayTo = hijackerSigner.getAddress().bech32();
+      const hijackAttempt = await request(gateway.app).post("/mcp/v1/tools/register").send({
+        name: "protected-security-scanner",
+        description: "Hijacked tool",
+        pricing: { microUsdc: "50000" },
+        payTo: hijackerPayTo,
+      });
+
+      expect(hijackAttempt.status).toBe(403);
+      expect(hijackAttempt.body.error).toContain("Tool name hijacking detected");
+    });
+
+    it("should prevent price tampering without cryptographic signature proof and accept valid Ed25519 signature", async () => {
+      const ownerMnemonic = Mnemonic.generate();
+      const ownerSigner = new UserSigner(ownerMnemonic.deriveKey(0));
+      const ownerAddress = ownerSigner.getAddress().bech32();
+
+      const initPayload = {
+        name: "tamper-proof-oracle",
+        description: "Original oracle tool",
+        pricing: { microUsdc: "5000" },
+        payTo: ownerAddress,
+      };
+
+      const initRes = await request(gateway.app).post("/mcp/v1/tools/register").send(initPayload);
+      expect(initRes.status).toBe(201);
+
+      // Attempt to tamper price without signature
+      const tamperAttempt = await request(gateway.app).post("/mcp/v1/tools/register").send({
+        name: "tamper-proof-oracle",
+        description: "Tampered oracle",
+        pricing: { microUsdc: "99000" },
+        payTo: ownerAddress,
+      });
+
+      expect(tamperAttempt.status).toBe(401);
+      expect(tamperAttempt.body.error).toContain("Cryptographic signature proof from payTo address");
+
+      // Sign message with owner's UserSigner to authorize price update
+      const msg = Buffer.from(`mcp-tool-register:tamper-proof-oracle:99000:${ownerAddress}`);
+      const validSig = (await ownerSigner.sign(msg)).toString("hex");
+
+      const updateRes = await request(gateway.app).post("/mcp/v1/tools/register").send({
+        name: "tamper-proof-oracle",
+        description: "Legitimate updated oracle",
+        pricing: { microUsdc: "99000" },
+        payTo: ownerAddress,
+        signature: validSig,
+      });
+
+      expect(updateRes.status).toBe(201);
+      expect(updateRes.body.success).toBe(true);
+      expect(updateRes.body.tool.pricing.microUsdc).toBe("99000");
+    });
+
+    it("should guarantee zero payment settlement and invoke automated escrow refund on tool failure", async () => {
+      // Register failing tool
+      executor.registerHandler("flaky-calc", async () => {
+        return {
+          content: [{ type: "text", text: "Internal computational failure" }],
+          isError: true,
+          errorCode: "TOOL_INTERNAL_ERROR",
+        };
+      });
+
+      registry.registerLocalTool({
+        name: "flaky-calc",
+        description: "Failing calculator",
+        inputSchema: {},
+        pricing: {
+          microUsdc: "5000",
+          usdFormatted: "$0.0050",
+          token: "USDC-c76f1f",
+          serviceId: 1,
+          providerAgentNonce: 1,
+        },
+        payTo: validPayTo,
+      });
+
+      const mockRefundFn = vi.fn().mockResolvedValue("refund-tx-12345");
+      const escrowAdapter = new McpEscrowAdapter({
+        refundFn: mockRefundFn,
+      });
+
+      const mockSettlementQueue = {
+        settle: vi.fn(),
+      };
+
+      const failingGateway = new McpGateway({
+        registry,
+        executor,
+        merchantPool,
+        verifier,
+        escrowAdapter,
+        settlementQueue: mockSettlementQueue as any,
+      });
+
+      const dummySig = Buffer.from(
+        JSON.stringify({
+          x402Version: 2,
+          network: "multiversx:1",
+          scheme: "exact",
+          payload: {
+            nonce: 1,
+            value: "0",
+            receiver: validPayTo,
+            sender: verifier.payerAddress,
+            gasPrice: 1000000000,
+            gasLimit: 50000000,
+            chainID: "1",
+            version: 1,
+            signature: "mock-sig",
+          },
+        })
+      ).toString("base64");
+
+      const res = await request(failingGateway.app)
+        .post("/mcp/v1/tools/call")
+        .set("payment-signature", dummySig)
+        .send({
+          jsonrpc: "2.0",
+          id: 42,
+          method: "tools/call",
+          params: {
+            name: "flaky-calc",
+            arguments: {},
+          },
+        });
+
+      expect(res.status).toBe(200);
+      expect(res.body.result.isError).toBe(true);
+      expect(res.body.settled).toBe(false);
+      expect(res.body.refunded).toBe(true);
+      expect(res.body.refundTransaction).toBe("refund-tx-12345");
+      expect(res.headers["x-payment-settled"]).toBe("false");
+      expect(res.headers["x-payment-refunded"]).toBe("true");
+
+      // Verify zero settlement occurred
+      expect(mockSettlementQueue.settle).not.toHaveBeenCalled();
+      // Verify refund was invoked
+      expect(mockRefundFn).toHaveBeenCalledTimes(1);
     });
   });
 });

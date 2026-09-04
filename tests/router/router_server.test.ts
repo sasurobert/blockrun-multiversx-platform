@@ -200,4 +200,23 @@ describe("ClawRouterServer (TDD)", () => {
     expect(openapiRes.body.openapi).toBe("3.0.3");
     expect(openapiRes.body.info.title).toContain("ClawRouter");
   });
+
+  it("should accept dynamic spot pricing updates via POST /api/v1/claw/spot-pricing", async () => {
+    const res = await request(routerServer.app)
+      .post("/api/v1/claw/spot-pricing")
+      .send([
+        { id: "groq-fast", costPerMillionInputTokensUsd: 0.12, tokensPerSecond: 350 },
+        { id: "unknown-node", costPerMillionInputTokensUsd: 0.5 },
+      ]);
+
+    expect(res.status).toBe(200);
+    expect(res.body.success).toBe(true);
+    expect(res.body.updatedCount).toBe(1);
+    expect(res.body.errors.length).toBe(1);
+    expect(res.body.errors[0]).toContain("unknown-node");
+
+    const updated = matrix.getProvider("groq-fast");
+    expect(updated?.costPerMillionInputTokensUsd).toBe(0.12);
+    expect(updated?.tokensPerSecond).toBe(350);
+  });
 });
